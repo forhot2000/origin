@@ -1,7 +1,14 @@
+原文：https://github.com/openshift/origin/blob/master/examples/sample-app/README.md
+
 OpenShift 3 Application Lifecycle Sample
 ========================================
 
+OpenShift 3应用程序生命周期示例
+===============================
+
 This is a set of configuration files and scripts which work with OpenShift 3 to create a new application and perform application builds.
+
+这组配置和脚本文件是运行于 OpenShift 3 的，用于创建新的 application 以及如何构建 application。
 
 This example assumes you have successfully built the `openshift`
 binary executable (normally located under origin/\_output/local/go/bin),
@@ -9,43 +16,79 @@ you have that and its symlink/copy `osc` in your `PATH` and root's,
 and Docker is installed and working.  See
 https://github.com/openshift/origin/blob/master/CONTRIBUTING.adoc.
 
+这个示例假设你已经成功的构建了 `openshift` 执行文件（通常这个文件被放在 
+origin/\_output/local/go/bin 目录下），并且你为符号链接了或复制了 `osc`
+到你的 `PATH` 以及 root 目录，并且 Docker 也已经安装并正常运行。请查看
+https://github.com/openshift/origin/blob/master/CONTRIBUTING.adoc。
+
 Alternatively, if you are using the openshift/origin Docker container, please
 make sure you follow these instructions first:
 https://github.com/openshift/origin/blob/master/examples/sample-app/container-setup.md
 
+另外，如果你是用 openshift/origin Docker container，请先确保你是遵循下面的架构：
+https://github.com/openshift/origin/blob/master/examples/sample-app/container-setup.md
+
 Security Warning
 ----------------
+
+安全警告
+--------
+
 OpenShift no longer requires SElinux to be disabled, however OpenShift is a system which runs Docker containers on your system.  In some cases (build operations and the registry service) it does so using privileged containers.  Furthermore those containers access your host's Docker daemon and perform `docker build` and `docker push` operations.  As such, you should be aware of the inherent security risks associated with performing `docker run` operations on arbitrary images as they effectively have root access.  This is particularly relevant when running the OpenShift nodes directly on your host system.
 
+OpenShift 不在要求停用 SElinux，但是 OpenShift 会在你的系统上面运行 Docker containers。在某些情况下（构建操作和 registry service）它会使用具有特权的 containers。此外，这些 containers 访问你的宿主机上的 Docker 后台程序，并且执行 `docker build` 和 `docker push` 操作。因此，你应该了解 `docker run` 允许任意 image 会带来安全问题，实际上它们是具有 root 访问权限的。这些都是直接在宿主机上运行 OpenShift 节点需要注意的事情。
+
 For more information, see these articles:
+
+更多信息请查看：
 
 * http://opensource.com/business/14/7/docker-security-selinux
 * https://docs.docker.com/articles/security/
 
 The OpenShift security model will continue to evolve and tighten as we head towards production ready code.
 
+OpenShift 安全模型将会持续改进，变得更安全，以在生产环境中使用。
+
 Setup
 -----
+
+安装
+----
+
 At this stage of OpenShift 3 development, there are a few things that you will need to configure on the host where OpenShift is running in order for things to work.
 
+在当前的 OpenShift 3 开发版本上，你还必须配置一些东西才能运行 OpenShift。
+
 **NOTE:** You do not need to do this if you are using [Vagrant](https://vagrantup.com/) to work with OpenShift.  Refer to the "VAGRANT USERS" callouts throughout this document for modifications specific to Vagrant users. 
+
+**注意：** 如果你使用 [Vagrant](https://vagrantup.com/) 运行 OpenShift，你不需要做这些。
+参考文档中的 "VAGRANT USERS" 注标。
 
 - - - 
 **VAGRANT USERS**:
 If you haven't already, fire up a Vagrant instance.
+
+**VAGRANT USERS**:
+如果你还没有运行 Vagrant，赶紧把它运行起来。
 
 	$ vagrant up 
 	$ vagrant ssh
 
 Inside of your Vagrant instance, the path to the origin directory is `/data/src/github.com/openshift/origin`.
 
+深入理解你的 Vagrant 实例，请转到 origin 的 `/data/src/github.com/openshift/origin` 目录。
+
 	$ cd /data/src/github.com/openshift/origin
 
 Run an advance build of the OpenShift binaries before continuing:
 
+在继续后面的步骤之前先编译 OpenShift：
+
 	$ make clean build
 
 This will set up a go workspace locally and will build all go components.  It is not necessary to make the docker and firewall changes, instead [jump to the next section](#application-build-deploy-and-update-flow).
+
+这将会构建一个本地的 go 工作环境，编译所有的 go 组建。不需要修改 docker 和防火墙设置，[跳到下一个章节](#application-build-deploy-and-update-flow).
 
 - - -
 
@@ -82,6 +125,9 @@ If you hit any snags while taking the sample app for a spin, check out the [trou
 
 Application Build, Deploy, and Update Flow
 ------------------------------------------
+
+应用构建部署以及更新流程
+-------------------------
 
 This section covers how to perform all the steps of building, deploying, and updating an application on the OpenShift platform.
 
