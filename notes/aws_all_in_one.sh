@@ -17,10 +17,14 @@ newgrp docker
 # install go-1.3.3
 curl -O https://storage.googleapis.com/golang/go1.3.3.linux-amd64.tar.gz
 sudo tar -C /usr/local -xzf go1.3.3.linux-amd64.tar.gz
+rm go1.3.3.linux-amd64.tar.gz
+
+sudo mkdir /data
+sudo chown ubuntu:ubuntu /data
 
 # env vriables
 echo 'export GOROOT=/usr/local/go' >> ~/.bash_profile
-echo 'export GOPATH=$HOME/go' >> ~/.bash_profile
+echo 'export GOPATH=/data/go' >> ~/.bash_profile
 echo 'export PATH=$PATH:$GOROOT/bin:$GOPATH/bin:$GOPATH/src/github.com/openshift/origin/_output/local/go/bin' >> ~/.bash_profile
 echo 'export KUBECONFIG=$GOPATH/src/github.com/openshift/origin/openshift.local.certificates/admin/.kubeconfig' >> ~/.bash_profile
 
@@ -33,11 +37,11 @@ echo "alias ll='ls -alF --color=auto'" >> ~/.bash_profile
 . ~/.bash_profile
 
 # pull source code
-mkdir -p ~/go/src/github.com/openshift/
-cd ~/go/src/github.com/openshift/
+mkdir -p $GOPATH/src/github.com/openshift/
+cd $GOPATH/src/github.com/openshift/
 git clone https://github.com/openshift/origin.git
 
-cd ~/go/src/github.com/openshift/origin
+cd $GOPATH/src/github.com/openshift/origin
 sudo chmod +r openshift.local.certificates/admin/.kubeconfig
 sudo chmod +r openshift.local.certificates/openshift-registry/.kubeconfig
 sudo chmod +r openshift.local.certificates/openshift-router/.kubeconfig
