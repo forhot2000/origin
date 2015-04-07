@@ -59,18 +59,18 @@ At this stage of OpenShift 3 development, there are a few things that you will n
 
 在当前的 OpenShift 3 开发版本上，你还必须配置一些东西才能运行 OpenShift。
 
-**NOTE:** You do not need to do this if you are using [Vagrant](https://vagrantup.com/) to work with OpenShift.  Refer to the "VAGRANT USERS" callouts throughout this document for modifications specific to Vagrant users. 
+**NOTE:** You do not need to do this if you are using [Vagrant](https://vagrantup.com/) to work with OpenShift.  Refer to the "VAGRANT USERS" callouts throughout this document for modifications specific to Vagrant users.
 
 **注意：** 如果你使用 [Vagrant](https://vagrantup.com/) 运行 OpenShift，你不需要做这些。参考文档中的 "VAGRANT USERS" 注标。
 
-- - - 
+- - -
 **VAGRANT USERS**:
 If you haven't already, fire up a Vagrant instance.
 
 **VAGRANT USERS**:
 如果你还没有运行 Vagrant，赶紧把它运行起来。
 
-	$ vagrant up 
+	$ vagrant up
 	$ vagrant ssh
 
 Inside of your Vagrant instance, the path to the origin directory is `/data/src/github.com/openshift/origin`.
