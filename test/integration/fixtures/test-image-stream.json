@@ -1,0 +1,10 @@
+{
+  "apiVersion": "v1beta1",
+  "kind": "ImageStream",
+  "metadata": {
+    "labels": {
+      "color": "blue"
+    },
+    "name": "test"
+  }
+}

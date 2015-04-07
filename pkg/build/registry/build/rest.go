@@ -6,7 +6,6 @@ import (
 	"code.google.com/p/go-uuid/uuid"
 	kapi "github.com/GoogleCloudPlatform/kubernetes/pkg/api"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/errors"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/apiserver"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/fields"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/labels"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/runtime"
@@ -22,7 +21,7 @@ type REST struct {
 }
 
 // NewREST creates a new REST for builds.
-func NewREST(registry Registry) apiserver.RESTStorage {
+func NewREST(registry Registry) *REST {
 	return &REST{registry}
 }
 
@@ -108,7 +107,8 @@ func (r *REST) Update(ctx kapi.Context, obj runtime.Object) (runtime.Object, boo
 	if err != nil {
 		return nil, false, err
 	}
-	return build, false, nil
+	out, err := r.Get(ctx, build.Name)
+	return out, false, err
 }
 
 // Watch begins watching for new, changed, or deleted Builds.

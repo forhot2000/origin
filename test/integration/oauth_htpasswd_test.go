@@ -8,8 +8,10 @@ import (
 	"testing"
 
 	kclient "github.com/GoogleCloudPlatform/kubernetes/pkg/client"
+	"github.com/GoogleCloudPlatform/kubernetes/pkg/runtime"
 
 	"github.com/openshift/origin/pkg/client"
+	configapi "github.com/openshift/origin/pkg/cmd/server/api"
 	"github.com/openshift/origin/pkg/cmd/util/tokencmd"
 	testutil "github.com/openshift/origin/test/util"
 )
@@ -21,12 +23,23 @@ func TestHTPasswd(t *testing.T) {
 	}
 	defer os.Remove(htpasswdFile.Name())
 
-	// This is all that should be needed to enable htpasswd-based auth
-	// If these change, need to update documentation at http://docs.openshift.org/latest/architecture/authentication.html
-	os.Setenv("OPENSHIFT_OAUTH_PASSWORD_AUTH", "htpasswd")
-	os.Setenv("OPENSHIFT_OAUTH_HTPASSWD_FILE", htpasswdFile.Name())
+	masterOptions, err := testutil.DefaultMasterOptions()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-	_, clusterAdminKubeConfig, err := testutil.StartTestMaster()
+	masterOptions.OAuthConfig.IdentityProviders[0] = configapi.IdentityProvider{
+		Name:            "htpasswd",
+		UseAsChallenger: true,
+		UseAsLogin:      true,
+		Provider: runtime.EmbeddedObject{
+			&configapi.HTPasswdPasswordIdentityProvider{
+				File: htpasswdFile.Name(),
+			},
+		},
+	}
+
+	clusterAdminKubeConfig, err := testutil.StartConfiguredMaster(masterOptions)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -44,7 +57,7 @@ func TestHTPasswd(t *testing.T) {
 
 	// Make sure we can't authenticate
 	if _, err := tokencmd.RequestToken(&anonConfig, nil, "username", "password"); err == nil {
-		t.Errorf("Expected error, got none", err)
+		t.Error("Expected error, got none")
 	}
 
 	// Update the htpasswd file with output of `htpasswd -n -b username password`

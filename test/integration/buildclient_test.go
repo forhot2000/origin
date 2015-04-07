@@ -10,6 +10,7 @@ import (
 
 	kapi "github.com/GoogleCloudPlatform/kubernetes/pkg/api"
 	klatest "github.com/GoogleCloudPlatform/kubernetes/pkg/api/latest"
+	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/rest"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/apiserver"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/client"
 	kclient "github.com/GoogleCloudPlatform/kubernetes/pkg/client"
@@ -19,6 +20,8 @@ import (
 	"github.com/GoogleCloudPlatform/kubernetes/plugin/pkg/admission/admit"
 
 	"github.com/openshift/origin/pkg/api/latest"
+	authorizationapi "github.com/openshift/origin/pkg/authorization/api"
+	"github.com/openshift/origin/pkg/authorization/registry/subjectaccessreview"
 	buildapi "github.com/openshift/origin/pkg/build/api"
 	buildclient "github.com/openshift/origin/pkg/build/client"
 	buildcontrollerfactory "github.com/openshift/origin/pkg/build/controller/factory"
@@ -30,13 +33,22 @@ import (
 	"github.com/openshift/origin/pkg/build/webhook"
 	"github.com/openshift/origin/pkg/build/webhook/github"
 	osclient "github.com/openshift/origin/pkg/client"
-	"github.com/openshift/origin/pkg/image/registry/imagerepository"
-	imagerepositoryetcd "github.com/openshift/origin/pkg/image/registry/imagerepository/etcd"
+	"github.com/openshift/origin/pkg/image/registry/imagestream"
+	imagestreametcd "github.com/openshift/origin/pkg/image/registry/imagestream/etcd"
 	testutil "github.com/openshift/origin/test/util"
 )
 
 func init() {
 	testutil.RequireEtcd()
+}
+
+type fakeSubjectAccessReviewRegistry struct {
+}
+
+var _ subjectaccessreview.Registry = &fakeSubjectAccessReviewRegistry{}
+
+func (f *fakeSubjectAccessReviewRegistry) CreateSubjectAccessReview(ctx kapi.Context, subjectAccessReview *authorizationapi.SubjectAccessReview) (*authorizationapi.SubjectAccessReviewResponse, error) {
+	return &authorizationapi.SubjectAccessReviewResponse{Allowed: true}, nil
 }
 
 func TestListBuilds(t *testing.T) {
@@ -189,32 +201,34 @@ func NewTestBuildOpenshift(t *testing.T) *testBuildOpenshift {
 	interfaces, _ := latest.InterfacesFor(latest.Version)
 
 	buildEtcd := buildetcd.New(etcdHelper)
-	imageRepositoryStorage, imageRepositoryStatus := imagerepositoryetcd.NewREST(
+
+	imageStreamStorage, imageStreamStatus := imagestreametcd.NewREST(
 		etcdHelper,
-		imagerepository.DefaultRegistryFunc(func() (string, bool) {
+		imagestream.DefaultRegistryFunc(func() (string, bool) {
 			return "registry:3000", true
 		}),
+		&fakeSubjectAccessReviewRegistry{},
 	)
-	imageRepositoryRegistry := imagerepository.NewRegistry(imageRepositoryStorage, imageRepositoryStatus)
+	imageStreamRegistry := imagestream.NewRegistry(imageStreamStorage, imageStreamStatus)
 
 	buildGenerator := &buildgenerator.BuildGenerator{
 		Client: buildgenerator.Client{
-			GetBuildConfigFunc:     buildEtcd.GetBuildConfig,
-			UpdateBuildConfigFunc:  buildEtcd.UpdateBuildConfig,
-			GetBuildFunc:           buildEtcd.GetBuild,
-			CreateBuildFunc:        buildEtcd.CreateBuild,
-			GetImageRepositoryFunc: imageRepositoryRegistry.GetImageRepository,
+			GetBuildConfigFunc:    buildEtcd.GetBuildConfig,
+			UpdateBuildConfigFunc: buildEtcd.UpdateBuildConfig,
+			GetBuildFunc:          buildEtcd.GetBuild,
+			CreateBuildFunc:       buildEtcd.CreateBuild,
+			GetImageStreamFunc:    imageStreamRegistry.GetImageStream,
 		},
 	}
 	buildClone, buildConfigInstantiate := buildgenerator.NewREST(buildGenerator)
 
-	storage := map[string]apiserver.RESTStorage{
+	storage := map[string]rest.Storage{
 		"builds":                   buildregistry.NewREST(buildEtcd),
 		"builds/clone":             buildClone,
 		"buildConfigs":             buildconfigregistry.NewREST(buildEtcd),
 		"buildConfigs/instantiate": buildConfigInstantiate,
-		"imageRepositories":        imageRepositoryStorage,
-		"imageRepositories/status": imageRepositoryStatus,
+		"imageStreams":             imageStreamStorage,
+		"imageStreams/status":      imageStreamStatus,
 	}
 
 	version := &apiserver.APIGroupVersion{
@@ -241,7 +255,7 @@ func NewTestBuildOpenshift(t *testing.T) *testBuildOpenshift {
 	bcClient := buildclient.NewOSClientBuildConfigClient(osClient)
 	osMux.Handle(openshift.whPrefix, http.StripPrefix(openshift.whPrefix,
 		webhook.NewController(bcClient, buildclient.NewOSClientBuildConfigInstantiatorClient(osClient),
-			osClient.ImageRepositories(kapi.NamespaceAll).(osclient.ImageRepositoryNamespaceGetter), map[string]webhook.Plugin{
+			osClient.ImageStreams(kapi.NamespaceAll).(osclient.ImageStreamNamespaceGetter), map[string]webhook.Plugin{
 				"github": github.New(),
 			})))
 

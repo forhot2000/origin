@@ -1,8 +1,11 @@
 package describe
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -11,11 +14,14 @@ import (
 	kerrs "github.com/GoogleCloudPlatform/kubernetes/pkg/api/errors"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/meta"
 	kclient "github.com/GoogleCloudPlatform/kubernetes/pkg/client"
+	"github.com/GoogleCloudPlatform/kubernetes/pkg/fields"
 	kctl "github.com/GoogleCloudPlatform/kubernetes/pkg/kubectl"
+	"github.com/GoogleCloudPlatform/kubernetes/pkg/labels"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/runtime"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/util"
 	"github.com/docker/docker/pkg/parsers"
 
+	"github.com/openshift/origin/pkg/api/graph"
 	authorizationapi "github.com/openshift/origin/pkg/authorization/api"
 	buildapi "github.com/openshift/origin/pkg/build/api"
 	buildutil "github.com/openshift/origin/pkg/build/util"
@@ -40,10 +46,10 @@ func DescriberFor(kind string, c *client.Client, kclient kclient.Interface, host
 		return &IdentityDescriber{c}, true
 	case "Image":
 		return &ImageDescriber{c}, true
-	case "ImageRepository":
-		return &ImageRepositoryDescriber{c}, true
-	case "ImageRepositoryTag":
-		return &ImageRepositoryTagDescriber{c}, true
+	case "ImageStream":
+		return &ImageStreamDescriber{c}, true
+	case "ImageStreamTag":
+		return &ImageStreamTagDescriber{c}, true
 	case "ImageStreamImage":
 		return &ImageStreamImageDescriber{c}, true
 	case "Route":
@@ -238,9 +244,29 @@ func (d *BuildConfigDescriber) DescribeTriggers(bc *buildapi.BuildConfig, host s
 	}
 }
 
+type sortableBuilds []buildapi.Build
+
+func (s sortableBuilds) Len() int {
+	return len(s)
+}
+
+func (s sortableBuilds) Less(i, j int) bool {
+	return s[i].CreationTimestamp.Before(s[j].CreationTimestamp)
+}
+
+func (s sortableBuilds) Swap(i, j int) {
+	t := s[i]
+	s[i] = s[j]
+	s[j] = t
+}
+
 func (d *BuildConfigDescriber) Describe(namespace, name string) (string, error) {
 	c := d.BuildConfigs(namespace)
 	buildConfig, err := c.Get(name)
+	if err != nil {
+		return "", err
+	}
+	builds, err := d.Builds(namespace).List(labels.SelectorFromSet(labels.Set{buildapi.BuildConfigLabel: name}), fields.Everything())
 	if err != nil {
 		return "", err
 	}
@@ -254,6 +280,23 @@ func (d *BuildConfigDescriber) Describe(namespace, name string) (string, error) 
 		}
 		describeBuildParameters(buildConfig.Parameters, out)
 		d.DescribeTriggers(buildConfig, d.host, out)
+		if len(builds.Items) == 0 {
+			return nil
+		}
+		fmt.Fprintf(out, "Builds(Name,Status,Creation Time)\n")
+		sortedBuilds := sortableBuilds(builds.Items)
+		sort.Sort(sortedBuilds)
+		c := 0
+		for i := range sortedBuilds {
+			// iterate backwards so we're printing the newest items first
+			build := sortedBuilds[len(sortedBuilds)-1-i]
+			fmt.Fprintf(out, fmt.Sprintf("- %s %s %v\n", build.Name, build.Status, build.CreationTimestamp.Rfc3339Copy().Time))
+			c++
+			// only print the 10 most recent builds.
+			if c > 10 {
+				break
+			}
+		}
 		return nil
 	})
 }
@@ -290,13 +333,13 @@ func describeImage(image *imageapi.Image) (string, error) {
 	})
 }
 
-// ImageRepositoryTagDescriber generates information about a ImageRepositoryTag (Image).
-type ImageRepositoryTagDescriber struct {
+// ImageStreamTagDescriber generates information about a ImageStreamTag (Image).
+type ImageStreamTagDescriber struct {
 	client.Interface
 }
 
-func (d *ImageRepositoryTagDescriber) Describe(namespace, name string) (string, error) {
-	c := d.ImageRepositoryTags(namespace)
+func (d *ImageStreamTagDescriber) Describe(namespace, name string) (string, error) {
+	c := d.ImageStreamTags(namespace)
 	repo, tag := parsers.ParseRepositoryTag(name)
 	if tag == "" {
 		// TODO use repo's preferred default, when that's coded
@@ -326,22 +369,22 @@ func (d *ImageStreamImageDescriber) Describe(namespace, name string) (string, er
 	return describeImage(image)
 }
 
-// ImageRepositoryDescriber generates information about a ImageRepository
-type ImageRepositoryDescriber struct {
+// ImageStreamDescriber generates information about a ImageStream
+type ImageStreamDescriber struct {
 	client.Interface
 }
 
-func (d *ImageRepositoryDescriber) Describe(namespace, name string) (string, error) {
-	c := d.ImageRepositories(namespace)
-	imageRepository, err := c.Get(name)
+func (d *ImageStreamDescriber) Describe(namespace, name string) (string, error) {
+	c := d.ImageStreams(namespace)
+	imageStream, err := c.Get(name)
 	if err != nil {
 		return "", err
 	}
 
 	return tabbedString(func(out *tabwriter.Writer) error {
-		formatMeta(out, imageRepository.ObjectMeta)
-		formatString(out, "Tags", formatLabels(imageRepository.Tags))
-		formatString(out, "Registry", imageRepository.Status.DockerImageRepository)
+		formatMeta(out, imageStream.ObjectMeta)
+		formatImageStreamTags(out, imageStream)
+		formatString(out, "Registry", imageStream.Status.DockerImageRepository)
 		return nil
 	})
 }
@@ -387,6 +430,198 @@ func (d *ProjectDescriber) Describe(namespace, name string) (string, error) {
 	})
 }
 
+// ProjectStatusDescriber generates extended information about a Project
+type ProjectStatusDescriber struct {
+	K kclient.Interface
+	C client.Interface
+}
+
+func (d *ProjectStatusDescriber) Describe(namespace, name string) (string, error) {
+	project, err := d.C.Projects().Get(namespace)
+	if err != nil {
+		return "", err
+	}
+
+	svcs, err := d.K.Services(namespace).List(labels.Everything())
+	if err != nil {
+		return "", err
+	}
+
+	bcs, err := d.C.BuildConfigs(namespace).List(labels.Everything(), fields.Everything())
+	if err != nil {
+		return "", err
+	}
+
+	dcs, err := d.C.DeploymentConfigs(namespace).List(labels.Everything(), fields.Everything())
+	if err != nil {
+		return "", err
+	}
+
+	g := graph.New()
+	for i := range bcs.Items {
+		graph.BuildConfig(g, &bcs.Items[i])
+	}
+	for i := range dcs.Items {
+		graph.DeploymentConfig(g, &dcs.Items[i])
+	}
+	for i := range svcs.Items {
+		graph.Service(g, &svcs.Items[i])
+	}
+	groups := graph.ServiceAndDeploymentGroups(graph.CoverServices(g))
+
+	return tabbedString(func(out *tabwriter.Writer) error {
+		indent := "  "
+		if len(project.DisplayName) > 0 && project.DisplayName != namespace {
+			fmt.Fprintf(out, "In project %s (%s)\n", project.DisplayName, namespace)
+		} else {
+			fmt.Fprintf(out, "In project %s\n", namespace)
+		}
+
+		for _, group := range groups {
+			if len(group.Builds) != 0 {
+				for _, flow := range group.Builds {
+					if flow.Image != nil {
+						if flow.Build != nil {
+							fmt.Fprintf(out, "\n%s -> build %s\n", flow.Image.ImageSpec, flow.Build.Name)
+						}
+					} else {
+						fmt.Fprintf(out, "\nbuild %s\n", flow.Build.Name)
+					}
+				}
+				continue
+			}
+			if len(group.Services) == 0 {
+				for _, deploy := range group.Deployments {
+					fmt.Fprintln(out)
+					printLines(out, indent, 0, describeDeploymentInServiceGroup(deploy)...)
+				}
+				continue
+			}
+			fmt.Fprintln(out)
+			for _, svc := range group.Services {
+				printLines(out, indent, 0, describeServiceInServiceGroup(svc)...)
+			}
+			for _, deploy := range group.Deployments {
+				printLines(out, indent, 1, describeDeploymentInServiceGroup(deploy)...)
+			}
+		}
+
+		if len(groups) == 0 {
+			fmt.Fprintln(out, "\nYou have no services, deployment configs, or build configs. 'osc new-app' can be used to create applications from scratch from existing Docker images and templates.")
+		} else {
+			fmt.Fprintln(out, "\nTo see more information about a service or deployment config, use 'osc describe service <name>' or 'osc describe dc <name>'.")
+			fmt.Fprintln(out, "You can use 'osc get pods,svc,dc,bc,builds' to see lists of each of the types described above.")
+		}
+
+		return nil
+	})
+}
+
+func printLines(out io.Writer, indent string, depth int, lines ...string) {
+	for i, s := range lines {
+		fmt.Fprintf(out, strings.Repeat(indent, depth))
+		if i != 0 {
+			fmt.Fprint(out, indent)
+		}
+		fmt.Fprintln(out, s)
+	}
+}
+
+func describeDeploymentInServiceGroup(deploy graph.DeploymentFlow) []string {
+	if len(deploy.Images) == 1 {
+		return []string{fmt.Sprintf("%s deploys %s", deploy.Deployment.Name, describeImageInPipeline(deploy.Images[0], deploy.Deployment.Namespace))}
+	}
+	lines := []string{fmt.Sprintf("%s deploys:", deploy.Deployment.Name)}
+	for _, image := range deploy.Images {
+		lines = append(lines, fmt.Sprintf("%s", describeImageInPipeline(image, deploy.Deployment.Namespace)))
+	}
+	return lines
+}
+
+func describeImageInPipeline(pipeline graph.ImagePipeline, namespace string) string {
+	switch {
+	case pipeline.Image != nil && pipeline.Build != nil:
+		return fmt.Sprintf("%s <- %s", describeImageTagInPipeline(pipeline.Image, namespace), describeBuildInPipeline(pipeline.Build.BuildConfig, pipeline.BaseImage))
+	case pipeline.Image != nil:
+		return describeImageTagInPipeline(pipeline.Image, namespace)
+	case pipeline.Build != nil:
+		return describeBuildInPipeline(pipeline.Build.BuildConfig, pipeline.BaseImage)
+	default:
+		return "<unknown>"
+	}
+}
+
+func describeImageTagInPipeline(image graph.ImageTagLocation, namespace string) string {
+	switch t := image.(type) {
+	case *graph.ImageStreamTagNode:
+		if t.ImageStream.Namespace != namespace {
+			return image.ImageSpec()
+		}
+		return fmt.Sprintf("%s:%s", t.ImageStream.Name, image.ImageTag())
+	default:
+		return image.ImageSpec()
+	}
+}
+
+func describeBuildInPipeline(build *buildapi.BuildConfig, baseImage graph.ImageTagLocation) string {
+	switch build.Parameters.Strategy.Type {
+	case buildapi.DockerBuildStrategyType:
+		// TODO: handle case where no source repo
+		source, ok := describeSourceInPipeline(&build.Parameters.Source)
+		if !ok {
+			return "docker build; no source set"
+		}
+		return fmt.Sprintf("docker build of %s", source)
+	case buildapi.STIBuildStrategyType:
+		source, ok := describeSourceInPipeline(&build.Parameters.Source)
+		if !ok {
+			return fmt.Sprintf("unconfigured source build %s", build.Name)
+		}
+		if baseImage == nil {
+			return fmt.Sprintf("%s; no image set", source)
+		}
+		return fmt.Sprintf("building %s on %s", source, baseImage.ImageSpec())
+	case buildapi.CustomBuildStrategyType:
+		source, ok := describeSourceInPipeline(&build.Parameters.Source)
+		if !ok {
+			return fmt.Sprintf("custom build %s", build.Name)
+		}
+		return fmt.Sprintf("custom build of %s", source)
+	default:
+		return fmt.Sprintf("unrecognized build %s", build.Name)
+	}
+}
+
+func describeSourceInPipeline(source *buildapi.BuildSource) (string, bool) {
+	switch source.Type {
+	case buildapi.BuildSourceGit:
+		if len(source.Git.Ref) == 0 {
+			return source.Git.URI, true
+		}
+		return fmt.Sprintf("%s#%s", source.Git.URI, source.Git.Ref), true
+	}
+	return "", false
+}
+
+func describeServiceInServiceGroup(svc graph.ServiceReference) []string {
+	spec := svc.Service.Spec
+	ip := spec.PortalIP
+	var port string
+	if spec.TargetPort.String() == "0" || ip == "None" {
+		port = fmt.Sprintf(":%d", spec.Port)
+	} else {
+		port = fmt.Sprintf(":%d -> %s", spec.Port, spec.TargetPort.String())
+	}
+	switch {
+	case ip == "None":
+		return []string{fmt.Sprintf("service %s (headless%s)", svc.Service.Name, port)}
+	case len(ip) == 0:
+		return []string{fmt.Sprintf("service %s (initializing%s)", svc.Service.Name, port)}
+	default:
+		return []string{fmt.Sprintf("service %s (%s%s)", svc.Service.Name, ip, port)}
+	}
+}
+
 // PolicyDescriber generates information about a Project
 type PolicyDescriber struct {
 	client.Interface
@@ -422,7 +657,13 @@ const policyRuleHeadings = "Verbs\tResources\tResource Names\tExtension"
 func describePolicyRule(out *tabwriter.Writer, rule authorizationapi.PolicyRule, indent string) {
 	extensionString := ""
 	if rule.AttributeRestrictions != (runtime.EmbeddedObject{}) {
-		extensionString = fmt.Sprintf("%v", rule.AttributeRestrictions)
+		extensionString = fmt.Sprintf("%#v", rule.AttributeRestrictions.Object)
+
+		buffer := new(bytes.Buffer)
+		printer := NewHumanReadablePrinter(true)
+		if err := printer.PrintObj(rule.AttributeRestrictions.Object, buffer); err == nil {
+			extensionString = strings.TrimSpace(buffer.String())
+		}
 	}
 
 	fmt.Fprintf(out, indent+"%v\t%v\t%v\t%v\n",
@@ -574,9 +815,8 @@ func (d *TemplateDescriber) DescribeParameters(params []templateapi.Parameter, o
 	}
 }
 
-func (d *TemplateDescriber) DescribeObjects(objects []runtime.Object, labels map[string]string, out *tabwriter.Writer) {
+func (d *TemplateDescriber) DescribeObjects(objects []runtime.Object, out *tabwriter.Writer) {
 	formatString(out, "Objects", " ")
-
 	indent := "    "
 	for _, obj := range objects {
 		if d.DescribeObject != nil {
@@ -589,17 +829,13 @@ func (d *TemplateDescriber) DescribeObjects(objects []runtime.Object, labels map
 		_, kind, _ := d.ObjectTyper.ObjectVersionAndKind(obj)
 		meta := kapi.ObjectMeta{}
 		meta.Name, _ = d.MetadataAccessor.Name(obj)
-		meta.Annotations, _ = d.MetadataAccessor.Annotations(obj)
-		meta.Labels, _ = d.MetadataAccessor.Labels(obj)
 		fmt.Fprintf(out, fmt.Sprintf("%s%s\t%s\n", indent, kind, meta.Name))
-		if len(meta.Labels) > 0 {
+		//meta.Annotations, _ = d.MetadataAccessor.Annotations(obj)
+		//meta.Labels, _ = d.MetadataAccessor.Labels(obj)
+		/*if len(meta.Labels) > 0 {
 			formatString(out, indent+"Labels", formatLabels(meta.Labels))
 		}
-		formatAnnotations(out, meta, indent)
-	}
-	if len(labels) > 0 {
-		out.Write([]byte("\n"))
-		formatString(out, indent+"Common Labels", formatLabels(labels))
+		formatAnnotations(out, meta, indent)*/
 	}
 }
 
@@ -616,7 +852,10 @@ func (d *TemplateDescriber) Describe(namespace, name string) (string, error) {
 		out.Flush()
 		d.DescribeParameters(template.Parameters, out)
 		out.Write([]byte("\n"))
-		d.DescribeObjects(template.Objects, template.ObjectLabels, out)
+		formatString(out, "Object Labels", formatLabels(template.ObjectLabels))
+		out.Write([]byte("\n"))
+		out.Flush()
+		d.DescribeObjects(template.Objects, out)
 		return nil
 	})
 }

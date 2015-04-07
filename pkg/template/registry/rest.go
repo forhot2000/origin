@@ -12,12 +12,14 @@ import (
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/registry/generic"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/runtime"
 	utilerr "github.com/GoogleCloudPlatform/kubernetes/pkg/util/errors"
+	"github.com/GoogleCloudPlatform/kubernetes/pkg/util/fielderrors"
 	"github.com/golang/glog"
 
 	"github.com/openshift/origin/pkg/template"
 	"github.com/openshift/origin/pkg/template/api"
 	"github.com/openshift/origin/pkg/template/api/validation"
 	"github.com/openshift/origin/pkg/template/generator"
+	"github.com/openshift/origin/pkg/util"
 )
 
 // templateStrategy implements behavior for Templates
@@ -35,12 +37,14 @@ func (templateStrategy) NamespaceScoped() bool {
 	return true
 }
 
-// ResetBeforeCreate clears fields that are not allowed to be set by end users on creation.
-func (templateStrategy) ResetBeforeCreate(obj runtime.Object) {
+func (templateStrategy) PrepareForUpdate(obj, old runtime.Object) {}
+
+// PrepareForCreate clears fields that are not allowed to be set by end users on creation.
+func (templateStrategy) PrepareForCreate(obj runtime.Object) {
 }
 
 // Validate validates a new template.
-func (templateStrategy) Validate(obj runtime.Object) errors.ValidationErrorList {
+func (templateStrategy) Validate(ctx kapi.Context, obj runtime.Object) fielderrors.ValidationErrorList {
 	template := obj.(*api.Template)
 	return validation.ValidateTemplate(template)
 }
@@ -51,7 +55,7 @@ func (templateStrategy) AllowCreateOnUpdate() bool {
 }
 
 // ValidateUpdate is the default update validation for an end user.
-func (templateStrategy) ValidateUpdate(obj, old runtime.Object) errors.ValidationErrorList {
+func (templateStrategy) ValidateUpdate(ctx kapi.Context, obj, old runtime.Object) fielderrors.ValidationErrorList {
 	return validation.ValidateTemplateUpdate(obj.(*api.Template), old.(*api.Template))
 }
 
@@ -98,7 +102,7 @@ func (s *REST) Create(ctx kapi.Context, obj runtime.Object) (runtime.Object, err
 
 	if tpl.ObjectLabels != nil {
 		objectLabels := labels.Set(tpl.ObjectLabels)
-		if err := template.AddConfigLabels(cfg, objectLabels); len(err) > 0 {
+		if err := util.AddConfigLabels(cfg, objectLabels); len(err) > 0 {
 			// TODO: We don't report the processing errors to users as there is no
 			// good way how to do it for just some items.
 			glog.V(1).Infof(utilerr.NewAggregate(err).Error())

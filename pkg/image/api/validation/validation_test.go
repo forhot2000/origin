@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	kapi "github.com/GoogleCloudPlatform/kubernetes/pkg/api"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/errors"
+	"github.com/GoogleCloudPlatform/kubernetes/pkg/util/fielderrors"
 	"github.com/openshift/origin/pkg/image/api"
 )
 
@@ -21,17 +21,17 @@ func TestValidateImageOK(t *testing.T) {
 func TestValidateImageMissingFields(t *testing.T) {
 	errorCases := map[string]struct {
 		I api.Image
-		T errors.ValidationErrorType
+		T fielderrors.ValidationErrorType
 		F string
 	}{
 		"missing Name": {
 			api.Image{DockerImageReference: "ref"},
-			errors.ValidationErrorTypeRequired,
+			fielderrors.ValidationErrorTypeRequired,
 			"name",
 		},
 		"missing DockerImageReference": {
 			api.Image{ObjectMeta: kapi.ObjectMeta{Name: "foo"}},
-			errors.ValidationErrorTypeRequired,
+			fielderrors.ValidationErrorTypeRequired,
 			"dockerImageReference",
 		},
 	}
@@ -44,7 +44,7 @@ func TestValidateImageMissingFields(t *testing.T) {
 		}
 		match := false
 		for i := range errs {
-			if errs[i].(*errors.ValidationError).Type == v.T && errs[i].(*errors.ValidationError).Field == v.F {
+			if errs[i].(*fielderrors.ValidationError).Type == v.T && errs[i].(*fielderrors.ValidationError).Field == v.F {
 				match = true
 				break
 			}
@@ -55,14 +55,14 @@ func TestValidateImageMissingFields(t *testing.T) {
 	}
 }
 
-func TestValidateImageRepositoryMappingNotOK(t *testing.T) {
+func TestValidateImageStreamMappingNotOK(t *testing.T) {
 	errorCases := map[string]struct {
-		I api.ImageRepositoryMapping
-		T errors.ValidationErrorType
+		I api.ImageStreamMapping
+		T fielderrors.ValidationErrorType
 		F string
 	}{
 		"missing DockerImageRepository": {
-			api.ImageRepositoryMapping{
+			api.ImageStreamMapping{
 				ObjectMeta: kapi.ObjectMeta{
 					Namespace: "default",
 				},
@@ -75,11 +75,11 @@ func TestValidateImageRepositoryMappingNotOK(t *testing.T) {
 					DockerImageReference: "openshift/ruby-19-centos",
 				},
 			},
-			errors.ValidationErrorTypeRequired,
+			fielderrors.ValidationErrorTypeRequired,
 			"dockerImageRepository",
 		},
 		"missing Name": {
-			api.ImageRepositoryMapping{
+			api.ImageStreamMapping{
 				ObjectMeta: kapi.ObjectMeta{
 					Namespace: "default",
 				},
@@ -92,11 +92,11 @@ func TestValidateImageRepositoryMappingNotOK(t *testing.T) {
 					DockerImageReference: "openshift/ruby-19-centos",
 				},
 			},
-			errors.ValidationErrorTypeRequired,
+			fielderrors.ValidationErrorTypeRequired,
 			"name",
 		},
 		"missing Tag": {
-			api.ImageRepositoryMapping{
+			api.ImageStreamMapping{
 				ObjectMeta: kapi.ObjectMeta{
 					Namespace: "default",
 				},
@@ -109,11 +109,11 @@ func TestValidateImageRepositoryMappingNotOK(t *testing.T) {
 					DockerImageReference: "openshift/ruby-19-centos",
 				},
 			},
-			errors.ValidationErrorTypeRequired,
+			fielderrors.ValidationErrorTypeRequired,
 			"tag",
 		},
 		"missing image name": {
-			api.ImageRepositoryMapping{
+			api.ImageStreamMapping{
 				ObjectMeta: kapi.ObjectMeta{
 					Namespace: "default",
 				},
@@ -126,11 +126,11 @@ func TestValidateImageRepositoryMappingNotOK(t *testing.T) {
 					DockerImageReference: "openshift/ruby-19-centos",
 				},
 			},
-			errors.ValidationErrorTypeRequired,
+			fielderrors.ValidationErrorTypeRequired,
 			"image.name",
 		},
 		"invalid repository pull spec": {
-			api.ImageRepositoryMapping{
+			api.ImageStreamMapping{
 				ObjectMeta: kapi.ObjectMeta{
 					Namespace: "default",
 				},
@@ -144,20 +144,20 @@ func TestValidateImageRepositoryMappingNotOK(t *testing.T) {
 					DockerImageReference: "openshift/ruby-19-centos",
 				},
 			},
-			errors.ValidationErrorTypeInvalid,
+			fielderrors.ValidationErrorTypeInvalid,
 			"dockerImageRepository",
 		},
 	}
 
 	for k, v := range errorCases {
-		errs := ValidateImageRepositoryMapping(&v.I)
+		errs := ValidateImageStreamMapping(&v.I)
 		if len(errs) == 0 {
 			t.Errorf("Expected failure for %s", k)
 			continue
 		}
 		match := false
 		for i := range errs {
-			if errs[i].(*errors.ValidationError).Type == v.T && errs[i].(*errors.ValidationError).Field == v.F {
+			if errs[i].(*fielderrors.ValidationError).Type == v.T && errs[i].(*fielderrors.ValidationError).Field == v.F {
 				match = true
 				break
 			}

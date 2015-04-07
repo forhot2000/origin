@@ -2,6 +2,7 @@ package v1
 
 import (
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/v1beta3"
+	"github.com/GoogleCloudPlatform/kubernetes/pkg/runtime"
 )
 
 // NodeConfig is the fully specified config starting an OpenShift node
@@ -26,8 +27,8 @@ type NodeConfig struct {
 	// VolumeDir is the directory that volumes will be stored under
 	VolumeDirectory string `json:"volumeDirectory"`
 
-	// NetworkContainerImage is the image used as the Kubelet network namespace and volume container.
-	NetworkContainerImage string `json:"networkContainerImage"`
+	// ImageConfig holds options that describe how to build image names for system components
+	ImageConfig ImageConfig `json:"imageConfig"`
 
 	// AllowDisabledDocker if true, the Kubelet will ignore errors from Docker.  This means that a node can start on a machine that doesn't have docker started.
 	AllowDisabledDocker bool `json:"allowDisabledDocker"`
@@ -46,7 +47,9 @@ type MasterConfig struct {
 	CORSAllowedOrigins []string `json:"corsAllowedOrigins"`
 
 	// EtcdClientInfo contains information about how to connect to etcd
-	EtcdClientInfo RemoteConnectionInfo `json:"etcdClientInfo"`
+	EtcdClientInfo EtcdConnectionInfo `json:"etcdClientInfo"`
+	// KubeletClientInfo contains information about how to connect to kubelets
+	KubeletClientInfo KubeletConnectionInfo `json:"kubeletClientInfo"`
 
 	// KubernetesMasterConfig, if present start the kubernetes master in this process
 	KubernetesMasterConfig *KubernetesMasterConfig `json:"kubernetesMasterConfig"`
@@ -83,11 +86,31 @@ type ImageConfig struct {
 }
 
 type RemoteConnectionInfo struct {
-	// URL is the URL for etcd
+	// URL is the remote URL to connect to
 	URL string `json:"url"`
-	// CA is the CA for confirming that the server at the etcdURL is the actual server
+	// CA is the CA for verifying TLS connections
 	CA string `json:"ca"`
-	// EtcdClientCertInfo is the TLS client cert information for securing communication to  etcd
+	// CertInfo is the TLS client cert information to present
+	// this is anonymous so that we can inline it for serialization
+	CertInfo `json:",inline"`
+}
+
+type KubeletConnectionInfo struct {
+	// Port is the port to connect to kubelets on
+	Port uint `json:"port"`
+	// CA is the CA for verifying TLS connections to kubelets
+	CA string `json:"ca"`
+	// CertInfo is the TLS client cert information for securing communication to kubelets
+	// this is anonymous so that we can inline it for serialization
+	CertInfo `json:",inline"`
+}
+
+type EtcdConnectionInfo struct {
+	// URLs are the URLs for etcd
+	URLs []string `json:"urls"`
+	// CA is a file containing trusted roots for the etcd server certificates
+	CA string `json:"ca"`
+	// CertInfo is the TLS client cert information for securing communication to etcd
 	// this is anonymous so that we can inline it for serialization
 	CertInfo `json:",inline"`
 }
@@ -122,22 +145,15 @@ type AssetConfig struct {
 	// PublicURL is where you can find the asset server (TODO do we really need this?)
 	PublicURL string `json:"publicURL"`
 
-	// LogoutURI is an optional, absolute URI to redirect web browsers to after logging out of the web console.
+	// LogoutURL is an optional, absolute URL to redirect web browsers to after logging out of the web console.
 	// If not specified, the built-in logout page is shown.
-	LogoutURI string `json:"logoutURI"`
+	LogoutURL string `json:"logoutURL"`
 
-	// MasterPublicURL is how the web console can access the OpenShift api server
+	// MasterPublicURL is how the web console can access the OpenShift v1beta3 server
 	MasterPublicURL string `json:"masterPublicURL"`
-
-	// TODO: we probably don't need this since we have a proxy
-	// KubernetesPublicURL is how the web console can access the Kubernetes api server
-	KubernetesPublicURL string `json:"kubernetesPublicURL"`
 }
 
 type OAuthConfig struct {
-	// ProxyCA is the certificate bundle for confirming the identity of front proxy forwards to the oauth server
-	ProxyCA string `json:"proxyCA"`
-
 	// MasterURL is used for building valid client redirect URLs for external access
 	MasterURL string `json:"masterURL"`
 
@@ -147,15 +163,112 @@ type OAuthConfig struct {
 	// AssetPublicURL is used for building valid client redirect URLs for external access
 	AssetPublicURL string `json:"assetPublicURL"`
 
-	// all the handlers here
+	IdentityProviders []IdentityProvider `json:"identityProviders"`
+
+	GrantConfig GrantConfig `json:"grantConfig"`
+
+	SessionConfig *SessionConfig `json:"sessionConfig"`
+
+	TokenConfig TokenConfig `json:"tokenConfig"`
 }
 
-type EtcdConfig struct {
-	ServingInfo ServingInfo `json:"servingInfo"`
+type TokenConfig struct {
+	// Max age of authorize tokens
+	AuthorizeTokenMaxAgeSeconds int32 `json:"authorizeTokenMaxAgeSeconds"`
+	// Max age of access tokens
+	AccessTokenMaxAgeSeconds int32 `json:"accessTokenMaxAgeSeconds"`
+}
 
-	PeerAddress   string `json:"peerAddress"`
-	MasterAddress string `json:"masterAddress"`
-	StorageDir    string `json:"storageDirectory"`
+type SessionConfig struct {
+	// SessionSecrets list the secret(s) to use to encrypt created sessions. Used by AuthRequestHandlerSession
+	SessionSecrets []string `json:"sessionSecrets"`
+	// SessionMaxAgeSeconds specifies how long created sessions last. Used by AuthRequestHandlerSession
+	SessionMaxAgeSeconds int32 `json:"sessionMaxAgeSeconds"`
+	// SessionName is the cookie name used to store the session
+	SessionName string `json:"sessionName"`
+}
+
+type IdentityProvider struct {
+	// Name is used to qualify the identities returned by this provider
+	Name string `json:"name"`
+	// UseAsChallenger indicates whether to issue WWW-Authenticate challenges for this provider
+	UseAsChallenger bool `json:"challenge"`
+	// UseAsLogin indicates whether to use this identity provider for unauthenticated browsers to login against
+	UseAsLogin bool `json:"login"`
+	// Provider contains the information about how to set up a specific identity provider
+	Provider runtime.RawExtension `json:"provider"`
+}
+
+type BasicAuthPasswordIdentityProvider struct {
+	v1beta3.TypeMeta `json:",inline"`
+
+	RemoteConnectionInfo `json:",inline"`
+}
+
+type AllowAllPasswordIdentityProvider struct {
+	v1beta3.TypeMeta `json:",inline"`
+}
+
+type DenyAllPasswordIdentityProvider struct {
+	v1beta3.TypeMeta `json:",inline"`
+}
+
+type HTPasswdPasswordIdentityProvider struct {
+	v1beta3.TypeMeta `json:",inline"`
+
+	File string `json:"file"`
+}
+
+type RequestHeaderIdentityProvider struct {
+	v1beta3.TypeMeta `json:",inline"`
+
+	ClientCA string   `json:"clientCA"`
+	Headers  []string `json:"headers"`
+}
+
+type OAuthRedirectingIdentityProvider struct {
+	v1beta3.TypeMeta `json:",inline"`
+
+	ClientID     string `json:"clientID"`
+	ClientSecret string `json:"clientSecret"`
+
+	Provider runtime.RawExtension `json:"provider"`
+}
+
+type GoogleOAuthProvider struct {
+	v1beta3.TypeMeta `json:",inline"`
+}
+type GitHubOAuthProvider struct {
+	v1beta3.TypeMeta `json:",inline"`
+}
+
+type GrantConfig struct {
+	// Method: allow, deny, prompt
+	Method GrantHandlerType `json:"method"`
+}
+
+type GrantHandlerType string
+
+const (
+	// GrantHandlerAuto auto-approves client authorization grant requests
+	GrantHandlerAuto GrantHandlerType = "auto"
+	// GrantHandlerPrompt prompts the user to approve new client authorization grant requests
+	GrantHandlerPrompt GrantHandlerType = "prompt"
+	// GrantHandlerDeny auto-denies client authorization grant requests
+	GrantHandlerDeny GrantHandlerType = "deny"
+)
+
+type EtcdConfig struct {
+	// ServingInfo describes how to start serving the etcd master
+	ServingInfo ServingInfo `json:"servingInfo"`
+	// Address is the advertised host:port for client connections to etcd
+	Address string `json:"address"`
+	// PeerServingInfo describes how to start serving the etcd peer
+	PeerServingInfo ServingInfo `json:"peerServingInfo"`
+	// PeerAddress is the advertised host:port for peer connections to etcd
+	PeerAddress string `json:"peerAddress"`
+
+	StorageDir string `json:"storageDirectory"`
 }
 
 type KubernetesMasterConfig struct {

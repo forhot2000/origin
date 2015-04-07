@@ -25,10 +25,11 @@ import (
 	imageapi "github.com/openshift/origin/pkg/image/api"
 )
 
-// logAndRetry retries forever - BuildPodController currently has no fatal errors
-func logAndRetry(obj interface{}, err error, _ int) bool {
+// limitedLogAndRetry stops retrying after 60 attempts.  Given the throttler configuration,
+// this means this event has been retried over a period of at least 50 seconds.
+func limitedLogAndRetry(obj interface{}, err error, count int) bool {
 	kutil.HandleError(err)
-	return true
+	return count < 60
 }
 
 // BuildControllerFactory constructs BuildController objects
@@ -50,9 +51,9 @@ func (factory *BuildControllerFactory) Create() controller.RunnableController {
 
 	client := ControllerClient{factory.KubeClient, factory.OSClient}
 	buildController := &buildcontroller.BuildController{
-		BuildUpdater:          factory.BuildUpdater,
-		ImageRepositoryClient: client,
-		PodManager:            client,
+		BuildUpdater:      factory.BuildUpdater,
+		ImageStreamClient: client,
+		PodManager:        client,
 		BuildStrategy: &typeBasedFactoryStrategy{
 			DockerBuildStrategy: factory.DockerBuildStrategy,
 			STIBuildStrategy:    factory.STIBuildStrategy,
@@ -62,7 +63,7 @@ func (factory *BuildControllerFactory) Create() controller.RunnableController {
 
 	return &controller.RetryController{
 		Queue:        queue,
-		RetryManager: controller.NewQueueRetryManager(queue, cache.MetaNamespaceKeyFunc, logAndRetry),
+		RetryManager: controller.NewQueueRetryManager(queue, cache.MetaNamespaceKeyFunc, limitedLogAndRetry, kutil.NewTokenBucketRateLimiter(1, 10)),
 		Handle: func(obj interface{}) error {
 			build := obj.(*buildapi.Build)
 			return buildController.HandleBuild(build)
@@ -106,7 +107,7 @@ func (factory *BuildPodControllerFactory) Create() controller.RunnableController
 
 	return &controller.RetryController{
 		Queue:        queue,
-		RetryManager: controller.NewQueueRetryManager(queue, cache.MetaNamespaceKeyFunc, logAndRetry),
+		RetryManager: controller.NewQueueRetryManager(queue, cache.MetaNamespaceKeyFunc, limitedLogAndRetry, kutil.NewTokenBucketRateLimiter(1, 10)),
 		Handle: func(obj interface{}) error {
 			pod := obj.(*kapi.Pod)
 			return buildPodController.HandlePod(pod)
@@ -114,8 +115,8 @@ func (factory *BuildPodControllerFactory) Create() controller.RunnableController
 	}
 }
 
-// ImageChangeControllerFactory can create an ImageChangeController which obtains ImageRepositories
-// from a queue populated from a watch of all ImageRepositories.
+// ImageChangeControllerFactory can create an ImageChangeController which obtains ImageStreams
+// from a queue populated from a watch of all ImageStreams.
 type ImageChangeControllerFactory struct {
 	Client                  osclient.Interface
 	BuildConfigInstantiator buildclient.BuildConfigInstantiator
@@ -128,7 +129,7 @@ type ImageChangeControllerFactory struct {
 // image is available
 func (factory *ImageChangeControllerFactory) Create() controller.RunnableController {
 	queue := cache.NewFIFO(cache.MetaNamespaceKeyFunc)
-	cache.NewReflector(&imageRepositoryLW{factory.Client}, &imageapi.ImageRepository{}, queue, 2*time.Minute).Run()
+	cache.NewReflector(&imageStreamLW{factory.Client}, &imageapi.ImageStream{}, queue, 2*time.Minute).Run()
 
 	store := cache.NewStore(cache.MetaNamespaceKeyFunc)
 	cache.NewReflector(&buildConfigLW{client: factory.Client}, &buildapi.BuildConfig{}, store, 2*time.Minute).Run()
@@ -145,16 +146,20 @@ func (factory *ImageChangeControllerFactory) Create() controller.RunnableControl
 		RetryManager: controller.NewQueueRetryManager(
 			queue,
 			cache.MetaNamespaceKeyFunc,
-			func(obj interface{}, err error, _ int) bool {
+			func(obj interface{}, err error, count int) bool {
 				kutil.HandleError(err)
 				if _, isFatal := err.(buildcontroller.ImageChangeControllerFatalError); isFatal {
 					return false
 				}
+				if count > 60 {
+					return false
+				}
 				return true
 			},
+			kutil.NewTokenBucketRateLimiter(1, 10),
 		),
 		Handle: func(obj interface{}) error {
-			imageRepo := obj.(*imageapi.ImageRepository)
+			imageRepo := obj.(*imageapi.ImageStream)
 			return imageChangeController.HandleImageRepo(imageRepo)
 		},
 	}
@@ -259,19 +264,19 @@ func (lw *buildConfigLW) Watch(resourceVersion string) (watch.Interface, error) 
 	return lw.client.BuildConfigs(kapi.NamespaceAll).Watch(labels.Everything(), fields.Everything(), resourceVersion)
 }
 
-// imageRepositoryLW is a ListWatcher for ImageRepositories.
-type imageRepositoryLW struct {
+// imageStreamLW is a ListWatcher for ImageStreams.
+type imageStreamLW struct {
 	client osclient.Interface
 }
 
-// List lists all ImageRepositories.
-func (lw *imageRepositoryLW) List() (runtime.Object, error) {
-	return lw.client.ImageRepositories(kapi.NamespaceAll).List(labels.Everything(), fields.Everything())
+// List lists all ImageStreams.
+func (lw *imageStreamLW) List() (runtime.Object, error) {
+	return lw.client.ImageStreams(kapi.NamespaceAll).List(labels.Everything(), fields.Everything())
 }
 
-// Watch watches all ImageRepositories.
-func (lw *imageRepositoryLW) Watch(resourceVersion string) (watch.Interface, error) {
-	return lw.client.ImageRepositories(kapi.NamespaceAll).Watch(labels.Everything(), fields.Everything(), resourceVersion)
+// Watch watches all ImageStreams.
+func (lw *imageStreamLW) Watch(resourceVersion string) (watch.Interface, error) {
+	return lw.client.ImageStreams(kapi.NamespaceAll).Watch(labels.Everything(), fields.Everything(), resourceVersion)
 }
 
 // ControllerClient implements the common interfaces needed for build controllers
@@ -290,7 +295,7 @@ func (c ControllerClient) DeletePod(namespace string, pod *kapi.Pod) error {
 	return c.KubeClient.Pods(namespace).Delete(pod.Name)
 }
 
-// GetImageRepository retrieves an image repository by namespace and name
-func (c ControllerClient) GetImageRepository(namespace, name string) (*imageapi.ImageRepository, error) {
-	return c.Client.ImageRepositories(namespace).Get(name)
+// GetImageStream retrieves an image repository by namespace and name
+func (c ControllerClient) GetImageStream(namespace, name string) (*imageapi.ImageStream, error) {
+	return c.Client.ImageStreams(namespace).Get(name)
 }

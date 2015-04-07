@@ -87,6 +87,15 @@ func NewCommandStartMaster() (*cobra.Command, *MasterOptions) {
 			startProfiler()
 
 			if err := options.StartMaster(); err != nil {
+				if kerrors.IsInvalid(err) {
+					if details := err.(*kerrors.StatusError).ErrStatus.Details; details != nil {
+						fmt.Fprintf(c.Out(), "Invalid %s %s\n", details.Kind, details.ID)
+						for _, cause := range details.Causes {
+							fmt.Fprintln(c.Out(), cause.Message)
+						}
+						os.Exit(255)
+					}
+				}
 				glog.Fatal(err)
 			}
 		},
@@ -121,8 +130,12 @@ func (o MasterOptions) Validate(args []string) error {
 		}
 	}
 
-	if err := o.MasterArgs.Validate(); err != nil {
-		return err
+	// if we are not starting up using a config file, run the argument validation
+	if o.WriteConfigOnly || len(o.ConfigFile) == 0 {
+		if err := o.MasterArgs.Validate(); err != nil {
+			return err
+		}
+
 	}
 
 	return nil
@@ -179,7 +192,7 @@ func (o MasterOptions) RunMaster() error {
 	var masterConfig *configapi.MasterConfig
 	var err error
 	if startUsingConfigFile {
-		masterConfig, err = ReadMasterConfig(o.ConfigFile)
+		masterConfig, err = configapilatest.ReadAndResolveMasterConfig(o.ConfigFile)
 	} else {
 		masterConfig, err = o.MasterArgs.BuildSerializeableMasterConfig()
 	}
@@ -206,7 +219,7 @@ func (o MasterOptions) RunMaster() error {
 			return err
 		}
 
-		content, err := WriteMaster(masterConfig)
+		content, err := configapilatest.WriteMaster(masterConfig)
 		if err != nil {
 			return err
 		}
@@ -218,7 +231,7 @@ func (o MasterOptions) RunMaster() error {
 
 	errs := validation.ValidateMasterConfig(masterConfig)
 	if len(errs) != 0 {
-		return kerrors.NewInvalid("masterConfig", "", errs)
+		return kerrors.NewInvalid("MasterConfig", o.ConfigFile, errs)
 	}
 
 	if err := StartMaster(masterConfig); err != nil {
@@ -270,42 +283,12 @@ func (o MasterOptions) CreateCerts() error {
 	return nil
 }
 
-func ReadMasterConfig(filename string) (*configapi.MasterConfig, error) {
-	data, err := ioutil.ReadFile(filename)
-	if err != nil {
-		return nil, err
-	}
-
-	config := &configapi.MasterConfig{}
-
-	if err := configapilatest.Codec.DecodeInto(data, config); err != nil {
-		return nil, err
-	}
-
-	base, err := cmdutil.MakeAbs(filepath.Dir(filename), "")
-	if err != nil {
-		return nil, err
-	}
-	if err := configapi.ResolveMasterConfigPaths(config, base); err != nil {
-		return nil, err
-	}
-
-	return config, nil
-}
-
 func StartMaster(openshiftMasterConfig *configapi.MasterConfig) error {
-	glog.Infof("Starting an OpenShift master, reachable at %s (etcd: %s)", openshiftMasterConfig.ServingInfo.BindAddress, openshiftMasterConfig.EtcdClientInfo.URL)
+	glog.Infof("Starting an OpenShift master, reachable at %s (etcd: %v)", openshiftMasterConfig.ServingInfo.BindAddress, openshiftMasterConfig.EtcdClientInfo.URLs)
 	glog.Infof("OpenShift master public address is %s", openshiftMasterConfig.AssetConfig.MasterPublicURL)
 
 	if openshiftMasterConfig.EtcdConfig != nil {
-		etcdConfig := &etcd.Config{
-			BindAddr:     openshiftMasterConfig.EtcdConfig.ServingInfo.BindAddress,
-			PeerBindAddr: openshiftMasterConfig.EtcdConfig.PeerAddress,
-			MasterAddr:   openshiftMasterConfig.EtcdConfig.MasterAddress,
-			EtcdDir:      openshiftMasterConfig.EtcdConfig.StorageDir,
-		}
-
-		etcdConfig.Run()
+		etcd.RunEtcd(openshiftMasterConfig.EtcdConfig)
 	}
 
 	// Allow privileged containers

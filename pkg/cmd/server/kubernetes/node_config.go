@@ -7,8 +7,11 @@ import (
 
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/client"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/kubelet/dockertools"
+	"github.com/golang/glog"
 
 	configapi "github.com/openshift/origin/pkg/cmd/server/api"
+	"github.com/openshift/origin/pkg/cmd/util"
+	"github.com/openshift/origin/pkg/cmd/util/variable"
 )
 
 // NodeConfig represents the required parameters to start the OpenShift node
@@ -27,8 +30,9 @@ type NodeConfig struct {
 	ClusterDomain string
 	ClusterDNS    net.IP
 
-	// The image used as the Kubelet network namespace and volume container.
-	NetworkContainerImage string
+	// a function that returns the appropriate image to use for a named component
+	ImageFor func(component string) string
+
 	// The name of the network plugin to activate
 	NetworkPluginName string
 
@@ -38,6 +42,7 @@ type NodeConfig struct {
 	// Whether to enable TLS serving
 	TLS bool
 
+	// Enable TLS serving
 	KubeletCertFile string
 	KubeletKeyFile  string
 
@@ -57,6 +62,10 @@ func BuildKubernetesNodeConfig(options configapi.NodeConfig) (*NodeConfig, error
 		return nil, err
 	}
 
+	if options.NodeName == "localhost" {
+		glog.Warningf(`Using "localhost" as node name will not resolve from all locations`)
+	}
+
 	var dnsIP net.IP
 	if len(options.DNSIP) > 0 {
 		dnsIP = net.ParseIP(options.DNSIP)
@@ -65,17 +74,31 @@ func BuildKubernetesNodeConfig(options configapi.NodeConfig) (*NodeConfig, error
 		}
 	}
 
+	clientCAs, err := util.CertPoolFromFile(options.ServingInfo.ClientCA)
+	if err != nil {
+		return nil, err
+	}
+
+	imageTemplate := variable.NewDefaultImageTemplate()
+	imageTemplate.Format = options.ImageConfig.Format
+	imageTemplate.Latest = options.ImageConfig.Latest
+
 	config := &NodeConfig{
 		NodeHost:    options.NodeName,
 		BindAddress: options.ServingInfo.BindAddress,
 
+		TLS:             configapi.UseTLS(options.ServingInfo),
+		KubeletCertFile: options.ServingInfo.ServerCert.CertFile,
+		KubeletKeyFile:  options.ServingInfo.ServerCert.KeyFile,
+		ClientCAs:       clientCAs,
+
 		ClusterDomain: options.DNSDomain,
 		ClusterDNS:    dnsIP,
 
-		VolumeDir:             options.VolumeDirectory,
-		NetworkContainerImage: options.NetworkContainerImage,
-		AllowDisabledDocker:   options.AllowDisabledDocker,
-		Client:                kubeClient,
+		VolumeDir:           options.VolumeDirectory,
+		ImageFor:            imageTemplate.ExpandOrDie,
+		AllowDisabledDocker: options.AllowDisabledDocker,
+		Client:              kubeClient,
 	}
 
 	return config, nil

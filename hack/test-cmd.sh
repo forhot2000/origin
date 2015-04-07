@@ -44,7 +44,8 @@ API_PORT=${API_PORT:-8443}
 API_HOST=${API_HOST:-127.0.0.1}
 MASTER_ADDR="${API_SCHEME}://${API_HOST}:${API_PORT}"
 PUBLIC_MASTER_HOST="${PUBLIC_MASTER_HOST:-${API_HOST}}"
-KUBELET_SCHEME=${KUBELET_SCHEME:-http}
+KUBELET_SCHEME=${KUBELET_SCHEME:-https}
+KUBELET_HOST=${KUBELET_HOST:-127.0.0.1}
 KUBELET_PORT=${KUBELET_PORT:-10250}
 
 TEMP_DIR=${USE_TEMP:-$(mktemp -d /tmp/openshift-cmd.XXXX)}
@@ -86,11 +87,34 @@ do
     SERVER_HOSTNAME_LIST="${SERVER_HOSTNAME_LIST},${IP_ADDRESS}"
 done <<< "${ALL_IP_ADDRESSES}"
 
-openshift admin create-master-certs --overwrite=false --cert-dir="${CERT_DIR}" --hostnames="${SERVER_HOSTNAME_LIST}" --master="${MASTER_ADDR}" --public-master="${API_SCHEME}://${PUBLIC_MASTER_HOST}"
-openshift admin create-node-config --listen="https://0.0.0.0:10250" --node-dir="${CERT_DIR}/node-${API_HOST}" --node="${API_HOST}" --hostnames="${SERVER_HOSTNAME_LIST}" --master="${MASTER_ADDR}" --certificate-authority="${CERT_DIR}/ca/cert.crt" --signer-cert="${CERT_DIR}/ca/cert.crt" --signer-key="${CERT_DIR}/ca/key.key" --signer-serial="${CERT_DIR}/ca/serial.txt"
+openshift admin create-master-certs \
+  --overwrite=false \
+  --cert-dir="${CERT_DIR}" \
+  --hostnames="${SERVER_HOSTNAME_LIST}" \
+  --master="${MASTER_ADDR}" \
+  --public-master="${API_SCHEME}://${PUBLIC_MASTER_HOST}"
+
+openshift admin create-node-config \
+  --listen="${KUBELET_SCHEME}://0.0.0.0:${KUBELET_PORT}" \
+  --node-dir="${CERT_DIR}/node-${KUBELET_HOST}" \
+  --node="${KUBELET_HOST}" \
+  --hostnames="${KUBELET_HOST}" \
+  --master="${MASTER_ADDR}" \
+  --node-client-certificate-authority="${CERT_DIR}/ca/cert.crt" \
+  --certificate-authority="${CERT_DIR}/ca/cert.crt" \
+  --signer-cert="${CERT_DIR}/ca/cert.crt" \
+  --signer-key="${CERT_DIR}/ca/key.key" \
+  --signer-serial="${CERT_DIR}/ca/serial.txt"
 
 # Start openshift
-OPENSHIFT_ON_PANIC=crash openshift start --master="${API_SCHEME}://${API_HOST}:${API_PORT}" --listen="${API_SCHEME}://${API_HOST}:${API_PORT}" --hostname="${API_HOST}" --volume-dir="${VOLUME_DIR}" --cert-dir="${CERT_DIR}" --etcd-dir="${ETCD_DATA_DIR}" --create-certs=false 1>&2 &
+OPENSHIFT_ON_PANIC=crash openshift start \
+  --master="${API_SCHEME}://${API_HOST}:${API_PORT}" \
+  --listen="${API_SCHEME}://${API_HOST}:${API_PORT}" \
+  --hostname="${KUBELET_HOST}" \
+  --volume-dir="${VOLUME_DIR}" \
+  --cert-dir="${CERT_DIR}" \
+  --etcd-dir="${ETCD_DATA_DIR}" \
+  --create-certs=false 1>&2 &
 OS_PID=$!
 
 if [[ "${API_SCHEME}" == "https" ]]; then
@@ -102,9 +126,9 @@ fi
 # set the home directory so we don't pick up the users .config
 export HOME="${CERT_DIR}/admin"
 
-wait_for_url "http://${API_HOST}:${KUBELET_PORT}/healthz" "kubelet: " 0.25 80
+wait_for_url "${KUBELET_SCHEME}://${KUBELET_HOST}:${KUBELET_PORT}/healthz" "kubelet: " 0.25 80
 wait_for_url "${API_SCHEME}://${API_HOST}:${API_PORT}/healthz" "apiserver: " 0.25 80
-wait_for_url "${API_SCHEME}://${API_HOST}:${API_PORT}/api/v1beta1/minions/127.0.0.1" "apiserver(minions): " 0.25 80
+wait_for_url "${API_SCHEME}://${API_HOST}:${API_PORT}/api/v1beta1/minions/${KUBELET_HOST}" "apiserver(minions): " 0.25 80
 
 # profile the cli commands
 export OPENSHIFT_PROFILE="${CLI_PROFILE-}"
@@ -181,6 +205,8 @@ echo "templates: ok"
 # help for root commands must be consistent
 [ "$(openshift | grep 'OpenShift Application Platform')" ]
 [ "$(osc | grep 'OpenShift Client')" ]
+[ "! $(osc | grep 'Options')" ]
+[ "! $(osc | grep 'Global Options')" ]
 [ "$(openshift cli | grep 'OpenShift Client')" ]
 [ "$(openshift kubectl 2>&1 | grep 'Kubernetes cluster')" ]
 [ "$(osadm 2>&1 | grep 'OpenShift Administrative Commands')" ]
@@ -189,6 +215,8 @@ echo "templates: ok"
 # help for root commands with --help flag must be consistent
 [ "$(openshift --help 2>&1 | grep 'OpenShift Application Platform')" ]
 [ "$(osc --help 2>&1 | grep 'OpenShift Client')" ]
+[ "$(osc login --help 2>&1 | grep 'Options')" ]
+[ "! $(osc login --help 2>&1 | grep 'Global Options')" ]
 [ "$(openshift cli --help 2>&1 | grep 'OpenShift Client')" ]
 [ "$(openshift kubectl --help 2>&1 | grep 'Kubernetes cluster')" ]
 [ "$(osadm --help 2>&1 | grep 'OpenShift Administrative Commands')" ]
@@ -241,29 +269,73 @@ osc create -f test/integration/fixtures/test-image.json
 osc delete images test
 echo "images: ok"
 
+osc get imageStreams
+osc create -f test/integration/fixtures/test-image-stream.json
+[ -z "$(osc get imageStreams test -t "{{.status.dockerImageRepository}}")" ]
+osc create -f examples/sample-app/docker-registry-config.json
+[ -n "$(osc get imageStreams test -t "{{.status.dockerImageRepository}}")" ]
+osc delete -f examples/sample-app/docker-registry-config.json
+osc delete imageStreams test
+[ -z "$(osc get imageStreams test -t "{{.status.dockerImageRepository}}")" ]
+osc create -f examples/image-streams/image-streams.json
+[ -n "$(osc get imageStreams ruby-20-centos7 -t "{{.status.dockerImageRepository}}")" ]
+[ -n "$(osc get imageStreams nodejs-010-centos7 -t "{{.status.dockerImageRepository}}")" ]
+[ -n "$(osc get imageStreams wildfly-8-centos -t "{{.status.dockerImageRepository}}")" ]
+[ -n "$(osc get imageStreams mysql-55-centos7 -t "{{.status.dockerImageRepository}}")" ]
+[ -n "$(osc get imageStreams postgresql-92-centos7 -t "{{.status.dockerImageRepository}}")" ]
+[ -n "$(osc get imageStreams mongodb-24-centos7 -t "{{.status.dockerImageRepository}}")" ]
+osc delete imageStreams ruby-20-centos7
+osc delete imageStreams nodejs-010-centos7
+osc delete imageStreams wildfly-8-centos
+osc delete imageStreams mysql-55-centos7
+osc delete imageStreams postgresql-92-centos7
+osc delete imageStreams mongodb-24-centos7
+[ -z "$(osc get imageStreams ruby-20-centos7 -t "{{.status.dockerImageRepository}}")" ]
+[ -z "$(osc get imageStreams nodejs-010-centos7 -t "{{.status.dockerImageRepository}}")" ]
+[ -z "$(osc get imageStreams wildfly-8-centos -t "{{.status.dockerImageRepository}}")" ]
+[ -z "$(osc get imageStreams mysql-55-centos7 -t "{{.status.dockerImageRepository}}")" ]
+[ -z "$(osc get imageStreams postgresql-92-centos7 -t "{{.status.dockerImageRepository}}")" ]
+[ -z "$(osc get imageStreams mongodb-24-centos7 -t "{{.status.dockerImageRepository}}")" ]
+echo "imageStreams: ok"
+
+osc create -f test/integration/fixtures/test-image-stream.json
+osc create -f test/integration/fixtures/test-image-stream-mapping.json
+osc get images
+osc get imageStreams
+osc get imageStreamTag test:sometag
+osc get imageStreamImage test@sha256:4986bf8c15363d1c5d15512d5266f8777bfba4974ac56e3270e7760f6f0a8125
+osc delete imageStreams test
+echo "imageStreamMappings: ok"
+
 osc get imageRepositories
 osc create -f test/integration/fixtures/test-image-repository.json
-[ -z "$(osc get imageRepositories test -t "{{.status.dockerImageRepository}}")" ]
-osc create -f examples/sample-app/docker-registry-config.json
 [ -n "$(osc get imageRepositories test -t "{{.status.dockerImageRepository}}")" ]
-osc delete -f examples/sample-app/docker-registry-config.json
 osc delete imageRepositories test
-[ -z "$(osc get imageRepositories test -t "{{.status.dockerImageRepository}}")" ]
 osc create -f examples/image-repositories/image-repositories.json
 [ -n "$(osc get imageRepositories ruby-20-centos7 -t "{{.status.dockerImageRepository}}")" ]
 [ -n "$(osc get imageRepositories nodejs-010-centos7 -t "{{.status.dockerImageRepository}}")" ]
 [ -n "$(osc get imageRepositories wildfly-8-centos -t "{{.status.dockerImageRepository}}")" ]
+[ -n "$(osc get imageRepositories mysql-55-centos7 -t "{{.status.dockerImageRepository}}")" ]
+[ -n "$(osc get imageRepositories postgresql-92-centos7 -t "{{.status.dockerImageRepository}}")" ]
+[ -n "$(osc get imageRepositories mongodb-24-centos7 -t "{{.status.dockerImageRepository}}")" ]
 osc delete imageRepositories ruby-20-centos7
 osc delete imageRepositories nodejs-010-centos7
+osc delete imageRepositories mysql-55-centos7
+osc delete imageRepositories postgresql-92-centos7
+osc delete imageRepositories mongodb-24-centos7
 [ -z "$(osc get imageRepositories ruby-20-centos7 -t "{{.status.dockerImageRepository}}")" ]
 [ -z "$(osc get imageRepositories nodejs-010-centos7 -t "{{.status.dockerImageRepository}}")" ]
+[ -z "$(osc get imageRepositories mysql-55-centos7 -t "{{.status.dockerImageRepository}}")" ]
+[ -z "$(osc get imageRepositories postgresql-92-centos7 -t "{{.status.dockerImageRepository}}")" ]
+[ -z "$(osc get imageRepositories mongodb-24-centos7 -t "{{.status.dockerImageRepository}}")" ]
 # don't delete wildfly-8-centos
 echo "imageRepositories: ok"
 
 osc create -f test/integration/fixtures/test-image-repository.json
-osc create -f test/integration/fixtures/test-mapping.json
+osc create -f test/integration/fixtures/test-image-repository-mapping.json
 osc get images
 osc get imageRepositories
+osc get imageRepositoryTag test:sometag
 osc delete imageRepositories test
 echo "imageRepositoryMappings: ok"
 
@@ -272,7 +344,7 @@ osc new-app php mysql
 echo "new-app: ok"
 
 osc get routes
-osc create -f test/integration/fixtures/test-route.json create routes
+osc create -f test/integration/fixtures/test-route.json
 osc delete routes testroute
 echo "routes: ok"
 
@@ -285,6 +357,8 @@ echo "deploymentConfigs: ok"
 
 osc process -f test/templates/fixtures/guestbook.json --parameters --value="ADMIN_USERNAME=admin"
 osc process -f test/templates/fixtures/guestbook.json | osc create -f -
+osc status
+[ "$(osc status | grep frontend-service)" ]
 echo "template+config: ok"
 
 openshift kube resize --replicas=2 rc guestbook
@@ -311,6 +385,8 @@ osc cancel-build "${started}" --dump-logs --restart
 # the build should use that specific tag of the image instead of the image field
 # as defined in the buildconfig
 started=$(osc start-build ruby-sample-build-validtag)
+osc describe imagestream ruby-20-centos7-buildcli
+osc describe build ${started}
 osc describe build ${started} | grep openshift/ruby-20-centos7:success$
 osc cancel-build "${started}" --dump-logs --restart
 echo "cancel-build: ok"
@@ -337,6 +413,7 @@ echo "ui-project-commands: ok"
 # Test deleting and recreating a project
 osadm new-project recreated-project --admin="createuser1"
 osc delete project recreated-project
+osc delete project recreated-project
 osadm new-project recreated-project --admin="createuser2"
 osc describe policybinding master -n recreated-project | grep createuser2
 echo "ex new-project: ok"
@@ -356,7 +433,17 @@ osadm registry --create --credentials="${OPENSHIFTCONFIG}"
 echo "ex registry: ok"
 
 # verify the image repository had its tags populated
-[ -n "$(osc get imageRepositories wildfly-8-centos -t "{{.tags.latest}}")" ]
-[ -n "$(osc get imageRepositories wildfly-8-centos -t "{{ index .metadata.annotations \"openshift.io/image.dockerRepositoryCheck\"}}")" ]
+[ -n "$(osc get imageStreams wildfly-8-centos -t "{{.status.tags.latest}}")" ]
+[ -n "$(osc get imageStreams wildfly-8-centos -t "{{ index .metadata.annotations \"openshift.io/image.dockerRepositoryCheck\"}}")" ]
+
+# Test building a dependency tree
+[ "$(openshift ex build-chain --all -o dot | grep 'graph')" ]
+echo "ex build-chain: ok"
 
 osc get minions,pods
+
+osadm new-project example --admin="createuser"
+osc project example
+osc create -f test/fixtures/app-scenarios
+osc status
+echo "complex-scenarios: ok"

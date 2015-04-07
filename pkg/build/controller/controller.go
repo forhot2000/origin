@@ -18,10 +18,10 @@ import (
 
 // BuildController watches build resources and manages their state
 type BuildController struct {
-	BuildUpdater          buildclient.BuildUpdater
-	PodManager            podManager
-	BuildStrategy         BuildStrategy
-	ImageRepositoryClient imageRepositoryClient
+	BuildUpdater      buildclient.BuildUpdater
+	PodManager        podManager
+	BuildStrategy     BuildStrategy
+	ImageStreamClient imageStreamClient
 }
 
 // BuildStrategy knows how to create a pod spec for a pod which can execute a build.
@@ -34,8 +34,8 @@ type podManager interface {
 	DeletePod(namespace string, pod *kapi.Pod) error
 }
 
-type imageRepositoryClient interface {
-	GetImageRepository(namespace, name string) (*imageapi.ImageRepository, error)
+type imageStreamClient interface {
+	GetImageStream(namespace, name string) (*imageapi.ImageStream, error)
 }
 
 func (bc *BuildController) HandleBuild(build *buildapi.Build) error {
@@ -84,7 +84,7 @@ func (bc *BuildController) nextBuildStatus(build *buildapi.Build) error {
 			namespace = build.Namespace
 		}
 
-		repo, err := bc.ImageRepositoryClient.GetImageRepository(namespace, ref.Name)
+		repo, err := bc.ImageStreamClient.GetImageStream(namespace, ref.Name)
 		if err != nil {
 			if errors.IsNotFound(err) {
 				return fmt.Errorf("the referenced output image repository %s/%s does not exist", namespace, ref.Name)
@@ -168,7 +168,7 @@ func (bc *BuildPodController) HandlePod(pod *kapi.Pod) error {
 	case kapi.PodSucceeded, kapi.PodFailed:
 		// Check the exit codes of all the containers in the pod
 		nextStatus = buildapi.BuildStatusComplete
-		for _, info := range pod.Status.Info {
+		for _, info := range pod.Status.ContainerStatuses {
 			if info.State.Termination != nil && info.State.Termination.ExitCode != 0 {
 				nextStatus = buildapi.BuildStatusFailed
 				break

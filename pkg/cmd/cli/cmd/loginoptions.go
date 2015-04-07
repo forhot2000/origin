@@ -39,6 +39,13 @@ type LoginOptions struct {
 	ClientConfig kclientcmd.ClientConfig
 	Config       *kclient.Config
 	Reader       io.Reader
+	Out          io.Writer
+
+	// cert data to be used when authenticating
+	CertFile string
+	CertData []byte
+	KeyFile  string
+	KeyData  []byte
 
 	// flow controllers
 	gatheredServerInfo  bool
@@ -135,6 +142,10 @@ func (o *LoginOptions) gatherAuthInfo() error {
 		// if not, we need to log in again
 
 		o.Config.BearerToken = ""
+		o.Config.CertFile = o.CertFile
+		o.Config.CertData = o.CertData
+		o.Config.KeyFile = o.KeyFile
+		o.Config.KeyData = o.KeyData
 		token, err := tokencmd.RequestToken(o.Config, o.Reader, o.Username, o.Password)
 		if err != nil {
 			return err

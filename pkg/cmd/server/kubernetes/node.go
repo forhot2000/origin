@@ -31,12 +31,6 @@ import (
 	"github.com/openshift/origin/pkg/service"
 )
 
-// NodeScheme is the default scheme for serving information about the node.
-const NodeScheme = "http"
-
-// NodePort is the default Kubelet port for serving information about the node.
-const NodePort = 10250
-
 type commandExecutor interface {
 	LookPath(executable string) (string, error)
 	Run(command string, args ...string) error
@@ -115,15 +109,20 @@ func (c *NodeConfig) RunKubelet() {
 	}
 
 	cadvisorInterface, err := cadvisor.New(4194)
+	if err == nil {
+		// TODO: use VersionInfo after the next rebase
+		_, err = cadvisorInterface.MachineInfo()
+	}
 	if err != nil {
 		glog.Errorf("WARNING: cAdvisor cannot be started: %v", err)
+		cadvisorInterface = &cadvisor.Fake{}
 	}
 
 	// initialize Kubelet
 	// Allow privileged containers
 	// TODO: make this configurable and not the default https://github.com/openshift/origin/issues/662
+	kubelet.SetupCapabilities(true, []string{})
 	recorder := record.FromSource(kapi.EventSource{Component: "kubelet", Host: c.NodeHost})
-	kubelet.SetupCapabilities(true)
 	cfg := kconfig.NewPodConfig(kconfig.PodConfigNotificationSnapshotAndUpdates, recorder)
 	kconfig.NewSourceApiserver(c.Client, c.NodeHost, cfg.Channel("api"))
 	gcPolicy := kubelet.ContainerGCPolicy{
@@ -141,7 +140,7 @@ func (c *NodeConfig) RunKubelet() {
 		c.DockerClient,
 		c.Client,
 		c.VolumeDir,
-		c.NetworkContainerImage,
+		c.ImageFor("pod"),
 		3*time.Second,
 		0.0,
 		10,
@@ -156,10 +155,8 @@ func (c *NodeConfig) RunKubelet() {
 		5*time.Minute,
 		recorder,
 		cadvisorInterface,
-		20*time.Second,
-		1*time.Minute,
 		imageGCPolicy,
-	)
+		nil)
 	if err != nil {
 		glog.Fatalf("Couldn't run kubelet: %s", err)
 	}
@@ -176,18 +173,18 @@ func (c *NodeConfig) RunKubelet() {
 	}
 
 	go util.Forever(func() {
-		glog.Infof("Started Kubelet for node %s, server at %s", c.NodeHost, c.BindAddress)
+		glog.Infof("Started Kubelet for node %s, server at %s, tls=%v", c.NodeHost, c.BindAddress, c.TLS)
 		if clusterDNS != nil {
 			glog.Infof("  Kubelet is setting %s as a DNS nameserver for domain %q", clusterDNS, c.ClusterDomain)
 		}
+		k.BirthCry()
 
 		if c.TLS {
 			server.TLSConfig = &tls.Config{
 				// Change default from SSLv3 to TLSv1.0 (because of POODLE vulnerability)
 				MinVersion: tls.VersionTLS10,
-				// Populate PeerCertificates in requests, but don't reject connections without certificates
-				// This allows certificates to be validated by authenticators, while still allowing other auth types
-				ClientAuth: tls.RequestClientCert,
+				// RequireAndVerifyClientCert lets us limit requests to ones with a valid client certificate
+				ClientAuth: tls.RequireAndVerifyClientCert,
 				ClientCAs:  c.ClientCAs,
 			}
 			glog.Fatal(server.ListenAndServeTLS(c.KubeletCertFile, c.KubeletKeyFile))

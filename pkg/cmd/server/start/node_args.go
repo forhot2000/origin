@@ -1,6 +1,7 @@
 package start
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -9,13 +10,10 @@ import (
 	"strings"
 
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/master/ports"
-	"github.com/ghodss/yaml"
-	"github.com/golang/glog"
 	"github.com/spf13/pflag"
 
 	"github.com/openshift/origin/pkg/cmd/server/admin"
 	configapi "github.com/openshift/origin/pkg/cmd/server/api"
-	latestconfigapi "github.com/openshift/origin/pkg/cmd/server/api/latest"
 	cmdutil "github.com/openshift/origin/pkg/cmd/util"
 )
 
@@ -29,7 +27,7 @@ type NodeArgs struct {
 	AllowDisabledDocker bool
 	VolumeDir           string
 
-	DefaultKubernetesURL url.URL
+	DefaultKubernetesURL *url.URL
 	ClusterDomain        string
 	ClusterDNS           net.IP
 
@@ -51,7 +49,6 @@ func NewDefaultNodeArgs() *NodeArgs {
 	hostname, err := defaultHostname()
 	if err != nil {
 		hostname = "localhost"
-		glog.Warningf("Unable to lookup hostname, using %q: %v", hostname, err)
 	}
 
 	var dnsIP net.IP
@@ -72,6 +69,17 @@ func NewDefaultNodeArgs() *NodeArgs {
 	}
 }
 
+func (args NodeArgs) Validate() error {
+	if err := args.KubeConnectionArgs.Validate(); err != nil {
+		return err
+	}
+	if _, err := args.KubeConnectionArgs.GetKubernetesAddress(args.DefaultKubernetesURL); err != nil {
+		return errors.New("--kubeconfig must be set to provide API server connection information")
+	}
+
+	return nil
+}
+
 // BuildSerializeableNodeConfig takes the NodeArgs (partially complete config) and uses them along with defaulting behavior to create the fully specified
 // config object for starting the node
 func (args NodeArgs) BuildSerializeableNodeConfig() (*configapi.NodeConfig, error) {
@@ -87,9 +95,13 @@ func (args NodeArgs) BuildSerializeableNodeConfig() (*configapi.NodeConfig, erro
 			BindAddress: net.JoinHostPort(args.ListenArg.ListenAddr.Host, strconv.Itoa(ports.KubeletPort)),
 		},
 
-		VolumeDirectory:       args.VolumeDir,
-		NetworkContainerImage: args.ImageFormatArgs.ImageTemplate.ExpandOrDie("pod"),
-		AllowDisabledDocker:   args.AllowDisabledDocker,
+		ImageConfig: configapi.ImageConfig{
+			Format: args.ImageFormatArgs.ImageTemplate.Format,
+			Latest: args.ImageFormatArgs.ImageTemplate.Latest,
+		},
+
+		VolumeDirectory:     args.VolumeDir,
+		AllowDisabledDocker: args.AllowDisabledDocker,
 
 		DNSDomain: args.ClusterDomain,
 		DNSIP:     dnsIP,
@@ -99,22 +111,10 @@ func (args NodeArgs) BuildSerializeableNodeConfig() (*configapi.NodeConfig, erro
 
 	if args.ListenArg.UseTLS() {
 		config.ServingInfo.ServerCert = admin.DefaultNodeServingCertInfo(args.CertArgs.CertDir, args.NodeName)
+		config.ServingInfo.ClientCA = admin.DefaultKubeletClientCAFile(args.CertArgs.CertDir)
 	}
 
 	return config, nil
-}
-
-// WriteNode serializes the config to yaml.
-func WriteNode(config *configapi.NodeConfig) ([]byte, error) {
-	json, err := latestconfigapi.Codec.Encode(config)
-	if err != nil {
-		return nil, err
-	}
-	content, err := yaml.JSONToYAML(json)
-	if err != nil {
-		return nil, err
-	}
-	return content, nil
 }
 
 // defaultHostname returns the default hostname for this system.

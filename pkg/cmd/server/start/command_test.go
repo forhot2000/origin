@@ -13,6 +13,7 @@ import (
 	utilerrors "github.com/GoogleCloudPlatform/kubernetes/pkg/util/errors"
 
 	configapi "github.com/openshift/origin/pkg/cmd/server/api"
+	configapilatest "github.com/openshift/origin/pkg/cmd/server/api/latest"
 	"github.com/openshift/origin/pkg/cmd/server/api/validation"
 )
 
@@ -105,30 +106,6 @@ func TestCommandBindingEtcd(t *testing.T) {
 
 	if expectedArgs.EtcdAddr.String() != actualCfg.EtcdAddr.String() {
 		t.Errorf("expected %v, got %v", expectedArgs.EtcdAddr.String(), actualCfg.EtcdAddr.String())
-	}
-}
-
-func TestCommandBindingKubernetes(t *testing.T) {
-	valueToSet := "http://example.org:9123"
-	actualCfg := executeMasterCommand([]string{"--kubernetes=" + valueToSet})
-
-	expectedArgs := NewDefaultMasterArgs()
-	expectedArgs.KubeConnectionArgs.KubernetesAddr.Set(valueToSet)
-
-	if expectedArgs.KubeConnectionArgs.KubernetesAddr.String() != actualCfg.KubeConnectionArgs.KubernetesAddr.String() {
-		t.Errorf("expected %v, got %v", expectedArgs.KubeConnectionArgs.KubernetesAddr.String(), actualCfg.KubeConnectionArgs.KubernetesAddr.String())
-	}
-}
-
-func TestCommandBindingKubernetesPublic(t *testing.T) {
-	valueToSet := "http://example.org:9123"
-	actualCfg := executeMasterCommand([]string{"--public-kubernetes=" + valueToSet})
-
-	expectedArgs := NewDefaultMasterArgs()
-	expectedArgs.KubernetesPublicAddr.Set(valueToSet)
-
-	if expectedArgs.KubernetesPublicAddr.String() != actualCfg.KubernetesPublicAddr.String() {
-		t.Errorf("expected %v, got %v", expectedArgs.KubernetesPublicAddr.String(), actualCfg.KubernetesPublicAddr.String())
 	}
 }
 
@@ -361,8 +338,8 @@ func executeAllInOneCommandWithConfigs(args []string) (*MasterArgs, *configapi.M
 	root.SetArgs(argsToUse)
 	root.Execute()
 
-	masterCfg, masterErr := ReadMasterConfig(fakeMasterConfigFile.Name())
-	nodeCfg, nodeErr := ReadNodeConfig(fakeNodeConfigFile.Name())
+	masterCfg, masterErr := configapilatest.ReadAndResolveMasterConfig(fakeMasterConfigFile.Name())
+	nodeCfg, nodeErr := configapilatest.ReadAndResolveNodeConfig(fakeNodeConfigFile.Name())
 
 	return cfg.MasterArgs, masterCfg, masterErr, cfg.NodeArgs, nodeCfg, nodeErr
 }

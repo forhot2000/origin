@@ -4,11 +4,11 @@ import (
 	"fmt"
 
 	kapi "github.com/GoogleCloudPlatform/kubernetes/pkg/api"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/errors"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/fields"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/labels"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/registry/generic"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/runtime"
+	"github.com/GoogleCloudPlatform/kubernetes/pkg/util/fielderrors"
 
 	"github.com/openshift/origin/pkg/image/api"
 	"github.com/openshift/origin/pkg/image/api/validation"
@@ -29,12 +29,12 @@ func (imageStrategy) NamespaceScoped() bool {
 	return false
 }
 
-// ResetBeforeCreate clears fields that are not allowed to be set by end users on creation.
-func (imageStrategy) ResetBeforeCreate(obj runtime.Object) {
+// PrepareForCreate clears fields that are not allowed to be set by end users on creation.
+func (imageStrategy) PrepareForCreate(obj runtime.Object) {
 }
 
 // Validate validates a new image.
-func (imageStrategy) Validate(obj runtime.Object) errors.ValidationErrorList {
+func (imageStrategy) Validate(ctx kapi.Context, obj runtime.Object) fielderrors.ValidationErrorList {
 	image := obj.(*api.Image)
 	return validation.ValidateImage(image)
 }

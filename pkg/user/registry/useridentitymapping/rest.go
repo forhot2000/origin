@@ -9,6 +9,7 @@ import (
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/rest"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/runtime"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/util"
+	"github.com/GoogleCloudPlatform/kubernetes/pkg/util/fielderrors"
 	"github.com/golang/glog"
 
 	"github.com/openshift/origin/pkg/user/api"
@@ -57,8 +58,8 @@ func (userIdentityMappingStrategy) AllowCreateOnUpdate() bool {
 	return true
 }
 
-// ResetBeforeCreate clears fields that are not allowed to be set by end users on creation.
-func (s userIdentityMappingStrategy) ResetBeforeCreate(obj runtime.Object) {
+// PrepareForCreate clears fields that are not allowed to be set by end users on creation.
+func (s userIdentityMappingStrategy) PrepareForCreate(obj runtime.Object) {
 	mapping := obj.(*api.UserIdentityMapping)
 
 	if len(mapping.Name) == 0 {
@@ -76,8 +77,8 @@ func (s userIdentityMappingStrategy) ResetBeforeCreate(obj runtime.Object) {
 	mapping.User.UID = ""
 }
 
-// ResetBeforeUpdate clears fields that are not allowed to be set by end users on update
-func (s userIdentityMappingStrategy) ResetBeforeUpdate(obj runtime.Object) {
+// PrepareForUpdate clears fields that are not allowed to be set by end users on update
+func (s userIdentityMappingStrategy) PrepareForUpdate(obj, old runtime.Object) {
 	mapping := obj.(*api.UserIdentityMapping)
 
 	if len(mapping.Name) == 0 {
@@ -95,13 +96,13 @@ func (s userIdentityMappingStrategy) ResetBeforeUpdate(obj runtime.Object) {
 }
 
 // Validate validates a new UserIdentityMapping.
-func (s userIdentityMappingStrategy) Validate(obj runtime.Object) kerrs.ValidationErrorList {
+func (s userIdentityMappingStrategy) Validate(ctx kapi.Context, obj runtime.Object) fielderrors.ValidationErrorList {
 	mapping := obj.(*api.UserIdentityMapping)
 	return validation.ValidateUserIdentityMapping(mapping)
 }
 
 // Validate validates an updated UserIdentityMapping.
-func (s userIdentityMappingStrategy) ValidateUpdate(obj runtime.Object, old runtime.Object) kerrs.ValidationErrorList {
+func (s userIdentityMappingStrategy) ValidateUpdate(ctx kapi.Context, obj runtime.Object, old runtime.Object) fielderrors.ValidationErrorList {
 	mapping := obj.(*api.UserIdentityMapping)
 	oldmapping := old.(*api.UserIdentityMapping)
 	return validation.ValidateUserIdentityMappingUpdate(mapping, oldmapping)
@@ -119,7 +120,7 @@ func (s *REST) Create(ctx kapi.Context, obj runtime.Object) (runtime.Object, err
 	if !ok {
 		return nil, errors.New("Invalid type")
 	}
-	Strategy.ResetBeforeCreate(mapping)
+	Strategy.PrepareForCreate(mapping)
 	createdMapping, _, err := s.createOrUpdate(ctx, obj, true)
 	return createdMapping, err
 }
@@ -132,7 +133,7 @@ func (s *REST) Update(ctx kapi.Context, obj runtime.Object) (runtime.Object, boo
 	if !ok {
 		return nil, false, errors.New("Invalid type")
 	}
-	Strategy.ResetBeforeUpdate(mapping)
+	Strategy.PrepareForUpdate(mapping, nil)
 	return s.createOrUpdate(ctx, mapping, false)
 }
 
@@ -187,8 +188,8 @@ func (s *REST) createOrUpdate(ctx kapi.Context, obj runtime.Object, forceCreate 
 
 	// Validate identity
 	if kerrs.IsNotFound(identityErr) {
-		errs := kerrs.ValidationErrorList([]error{
-			kerrs.NewFieldInvalid("identity.name", mapping.Identity.Name, "referenced identity does not exist"),
+		errs := fielderrors.ValidationErrorList([]error{
+			fielderrors.NewFieldInvalid("identity.name", mapping.Identity.Name, "referenced identity does not exist"),
 		})
 		return nil, false, kerrs.NewInvalid("UserIdentityMapping", mapping.Name, errs)
 	}
@@ -196,8 +197,8 @@ func (s *REST) createOrUpdate(ctx kapi.Context, obj runtime.Object, forceCreate 
 	// Get new user
 	newUser, err := s.userRegistry.GetUser(ctx, mapping.User.Name)
 	if kerrs.IsNotFound(err) {
-		errs := kerrs.ValidationErrorList([]error{
-			kerrs.NewFieldInvalid("user.name", mapping.User.Name, "referenced user does not exist"),
+		errs := fielderrors.ValidationErrorList([]error{
+			fielderrors.NewFieldInvalid("user.name", mapping.User.Name, "referenced user does not exist"),
 		})
 		return nil, false, kerrs.NewInvalid("UserIdentityMapping", mapping.Name, errs)
 	}

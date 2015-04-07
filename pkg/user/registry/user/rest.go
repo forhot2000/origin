@@ -4,11 +4,11 @@ import (
 	"fmt"
 
 	kapi "github.com/GoogleCloudPlatform/kubernetes/pkg/api"
-	kerrs "github.com/GoogleCloudPlatform/kubernetes/pkg/api/errors"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/fields"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/labels"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/registry/generic"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/runtime"
+	"github.com/GoogleCloudPlatform/kubernetes/pkg/util/fielderrors"
 
 	"github.com/openshift/origin/pkg/user/api"
 	"github.com/openshift/origin/pkg/user/api/validation"
@@ -23,6 +23,8 @@ type userStrategy struct {
 // objects via the REST API.
 var Strategy = userStrategy{kapi.Scheme}
 
+func (userStrategy) PrepareForUpdate(obj, old runtime.Object) {}
+
 // NamespaceScoped is false for users
 func (userStrategy) NamespaceScoped() bool {
 	return false
@@ -32,11 +34,11 @@ func (userStrategy) GenerateName(base string) string {
 	return base
 }
 
-func (userStrategy) ResetBeforeCreate(obj runtime.Object) {
+func (userStrategy) PrepareForCreate(obj runtime.Object) {
 }
 
 // Validate validates a new user
-func (userStrategy) Validate(obj runtime.Object) kerrs.ValidationErrorList {
+func (userStrategy) Validate(ctx kapi.Context, obj runtime.Object) fielderrors.ValidationErrorList {
 	user := obj.(*api.User)
 	return validation.ValidateUser(user)
 }
@@ -47,7 +49,7 @@ func (userStrategy) AllowCreateOnUpdate() bool {
 }
 
 // ValidateUpdate is the default update validation for an end user.
-func (userStrategy) ValidateUpdate(obj, old runtime.Object) kerrs.ValidationErrorList {
+func (userStrategy) ValidateUpdate(ctx kapi.Context, obj, old runtime.Object) fielderrors.ValidationErrorList {
 	return validation.ValidateUserUpdate(obj.(*api.User), old.(*api.User))
 }
 

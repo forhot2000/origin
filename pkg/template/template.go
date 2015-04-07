@@ -6,23 +6,18 @@ import (
 	"strings"
 
 	kapi "github.com/GoogleCloudPlatform/kubernetes/pkg/api"
-	errs "github.com/GoogleCloudPlatform/kubernetes/pkg/api/errors"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/meta"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/runtime"
+	"github.com/GoogleCloudPlatform/kubernetes/pkg/util/fielderrors"
 	configapi "github.com/openshift/origin/pkg/config/api"
 	deployapi "github.com/openshift/origin/pkg/deploy/api"
+
 	"github.com/openshift/origin/pkg/template/api"
 	. "github.com/openshift/origin/pkg/template/generator"
+	"github.com/openshift/origin/pkg/util"
 )
 
 var parameterExp = regexp.MustCompile(`\$\{([a-zA-Z0-9\_]+)\}`)
-
-// reportError reports the single item validation error and properly set the
-// prefix and index to match the Config item JSON index
-func reportError(allErrs *errs.ValidationErrorList, index int, err errs.ValidationError) {
-	i := errs.ValidationErrorList{}
-	*allErrs = append(*allErrs, append(i, &err).PrefixIndex(index).Prefix("item")...)
-}
 
 // Processor process the Template into the List with substituted parameters
 type Processor struct {
@@ -38,22 +33,22 @@ func NewProcessor(generators map[string]Generator) *Processor {
 // Parameter values using the defined set of generators first, and then it
 // substitutes all Parameter expression occurrences with their corresponding
 // values (currently in the containers' Environment variables only).
-func (p *Processor) Process(template *api.Template) (*configapi.Config, errs.ValidationErrorList) {
-	templateErrors := errs.ValidationErrorList{}
+func (p *Processor) Process(template *api.Template) (*configapi.Config, fielderrors.ValidationErrorList) {
+	templateErrors := fielderrors.ValidationErrorList{}
 
 	if err := p.GenerateParameterValues(template); err != nil {
-		return nil, append(templateErrors.Prefix("Template"), errs.NewFieldInvalid("parameters", err, "failure to generate parameter value"))
+		return nil, append(templateErrors.Prefix("Template"), fielderrors.NewFieldInvalid("parameters", err, "failure to generate parameter value"))
 	}
 
 	for i, item := range template.Objects {
 		newItem, err := p.SubstituteParameters(template.Parameters, item)
 		if err != nil {
-			reportError(&templateErrors, i, *errs.NewFieldNotSupported("parameters", err))
+			util.ReportError(&templateErrors, i, *fielderrors.NewFieldNotSupported("parameters", err))
 		}
 		// Remove namespace from the item
 		itemMeta, err := meta.Accessor(newItem)
 		if err != nil {
-			reportError(&templateErrors, i, *errs.NewFieldInvalid("namespace", err, "failed to remove the item namespace"))
+			util.ReportError(&templateErrors, i, *fielderrors.NewFieldInvalid("namespace", err, "failed to remove the item namespace"))
 		}
 		itemMeta.SetNamespace("")
 		template.Objects[i] = newItem

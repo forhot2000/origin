@@ -58,7 +58,7 @@ func walkJSONFiles(inDir string, fn func(name, path string, data []byte)) error 
 func TestExampleObjectSchemas(t *testing.T) {
 	// Allow privileged containers
 	// TODO: make this configurable and not the default https://github.com/openshift/origin/issues/662
-	kubelet.SetupCapabilities(true)
+	kubelet.SetupCapabilities(true, nil)
 	cases := map[string]map[string]runtime.Object{
 		"../examples/hello-openshift": {
 			"hello-pod":     &kapi.Pod{},
@@ -80,14 +80,16 @@ func TestExampleObjectSchemas(t *testing.T) {
 			"image-repositories": &imageapi.ImageRepositoryList{},
 		},
 		"../test/integration/fixtures": {
-			"test-deployment-config": &deployapi.DeploymentConfig{},
-			"test-image-repository":  &imageapi.ImageRepository{},
-			"test-image":             &imageapi.Image{},
-			"test-mapping":           &imageapi.ImageRepositoryMapping{},
-			"test-route":             &routeapi.Route{},
-			"test-service":           &kapi.Service{},
-			"test-buildcli":          &kapi.List{},
-			"test-buildcli-beta2":    &kapi.List{},
+			"test-deployment-config":        &deployapi.DeploymentConfig{},
+			"test-image":                    &imageapi.Image{},
+			"test-image-repository":         &imageapi.ImageRepository{},
+			"test-image-repository-mapping": &imageapi.ImageRepositoryMapping{},
+			"test-image-stream":             &imageapi.ImageStream{},
+			"test-image-stream-mapping":     &imageapi.ImageStreamMapping{},
+			"test-route":                    &routeapi.Route{},
+			"test-service":                  &kapi.Service{},
+			"test-buildcli":                 &kapi.List{},
+			"test-buildcli-beta2":           &kapi.List{},
 		},
 		"../test/templates/fixtures": {
 			"crunchydata-pod": nil, // Explicitly fails validation, but should pass transformation

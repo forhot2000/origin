@@ -183,7 +183,8 @@ module.exports = function (grunt) {
           'bower_components/messenger/build/css/messenger-theme-air.css',
           'bower_components/messenger/build/css/messenger-theme-ice.css',
           'bower_components/messenger/build/js/messenger-theme-future.js',
-          'bower_components/messenger/build/js/messenger-theme-flat.js'
+          'bower_components/messenger/build/js/messenger-theme-flat.js',
+          'bower_components/fontawesome/css/font-awesome.css'
         ]
       }
     },
@@ -251,8 +252,8 @@ module.exports = function (grunt) {
                 createConfig: function(context, block) {
                   var generated = context.options.generated;
                   generated.options = {
-                    compress: true,
-                    mangle: true,
+                    compress: {},
+                    mangle: {},
                     beautify: {
                       beautify: true,
                       indent_level: 0, // Don't waste characters indenting

@@ -4,11 +4,11 @@ import (
 	"fmt"
 
 	kapi "github.com/GoogleCloudPlatform/kubernetes/pkg/api"
-	kerrs "github.com/GoogleCloudPlatform/kubernetes/pkg/api/errors"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/fields"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/labels"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/registry/generic"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/runtime"
+	"github.com/GoogleCloudPlatform/kubernetes/pkg/util/fielderrors"
 
 	"github.com/openshift/origin/pkg/user/api"
 	"github.com/openshift/origin/pkg/user/api/validation"
@@ -23,6 +23,8 @@ type identityStrategy struct {
 // objects via the REST API.
 var Strategy = identityStrategy{kapi.Scheme}
 
+func (identityStrategy) PrepareForUpdate(obj, old runtime.Object) {}
+
 // NamespaceScoped is false for users
 func (identityStrategy) NamespaceScoped() bool {
 	return false
@@ -32,13 +34,13 @@ func (identityStrategy) GenerateName(base string) string {
 	return base
 }
 
-func (identityStrategy) ResetBeforeCreate(obj runtime.Object) {
+func (identityStrategy) PrepareForCreate(obj runtime.Object) {
 	identity := obj.(*api.Identity)
 	identity.Name = identityName(identity.ProviderName, identity.ProviderUserName)
 }
 
 // Validate validates a new user
-func (identityStrategy) Validate(obj runtime.Object) kerrs.ValidationErrorList {
+func (identityStrategy) Validate(ctx kapi.Context, obj runtime.Object) fielderrors.ValidationErrorList {
 	identity := obj.(*api.Identity)
 	return validation.ValidateIdentity(identity)
 }
@@ -49,7 +51,7 @@ func (identityStrategy) AllowCreateOnUpdate() bool {
 }
 
 // ValidateUpdate is the default update validation for an identity
-func (identityStrategy) ValidateUpdate(obj, old runtime.Object) kerrs.ValidationErrorList {
+func (identityStrategy) ValidateUpdate(ctx kapi.Context, obj, old runtime.Object) fielderrors.ValidationErrorList {
 	return validation.ValidateIdentityUpdate(obj.(*api.Identity), old.(*api.Identity))
 }
 
