@@ -45,6 +45,7 @@ make clean build
 
 # start 
 sudo -s
+mkdir -p logs/
 nohup openshift start --public-master="https://ec2-52-4-51-219.compute-1.amazonaws.com:8443" > logs/out.log & 
 exit
 
