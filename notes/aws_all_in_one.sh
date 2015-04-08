@@ -44,9 +44,18 @@ cd $GOPATH/src/github.com/openshift/origin
 make clean build
 
 # start 
-openshift start --public-master="https://ec2-52-4-51-219.compute-1.amazonaws.com:8443"
+sudo -s
+nohup openshift start --public-master="https://ec2-52-4-51-219.compute-1.amazonaws.com:8443" > logs/out.log & 
+exit
+
+sudo tail -f logs/out.log
 
 #manual: open https://ec2-52-4-51-219.compute-1.amazonaws.com:8443/console/
+
+
+# open new shell window
+
+cd $GOPATH/src/github.com/openshift/origin
 
 # certs permission
 sudo chmod +r openshift.local.certificates/admin/.kubeconfig
@@ -68,19 +77,11 @@ openshift ex router --create --credentials="openshift.local.certificates/openshi
 
 
 # careate sample-app
-cd $GOPATH/src/github.com/openshift/origin/examples/sample-app
 openshift ex new-project test --display-name="OpenShift 3 Sample" --description="This is an example project to demonstrate OpenShift v3" --admin=test-admin
-osc process -n test -f application-template-stibuild.json | osc create -n test -f -
-
-# update sample-app
-osc process -n test -f application-template-stibuild.json | osc update -n test -f -
-
-# delete sample-app
-osc process -n test -f application-template-stibuild.json | osc delete -n test -f -
+osc process -n test -f examples/sample-app/application-template-stibuild.json | osc create -n test -f -
 
 
 # clean
-cd $GOPATH/src/github.com/openshift/origin
 sudo examples/sample-app/cleanup.sh
 docker ps -a | awk '{ print $NF " " $1 }' | grep ^k8s_ | awk '{print $2}' |  xargs -l -r docker rm
 
