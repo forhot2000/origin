@@ -81,6 +81,9 @@ openshift ex router --create --credentials="openshift.local.certificates/openshi
 openshift ex new-project test --display-name="OpenShift 3 Sample" --description="This is an example project to demonstrate OpenShift v3" --admin=test-admin
 osc process -n test -f examples/sample-app/application-template-stibuild.json | osc create -n test -f -
 
+# resize
+openshift kube resize --replicas=2 replicationController frontend-1 -n test
+
 
 # clean
 sudo examples/sample-app/cleanup.sh
