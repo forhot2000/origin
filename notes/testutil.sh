@@ -31,6 +31,7 @@ function init_users
 
 function logs
 {
+  echo "Press ^C to break."
   sudo tail -f nohup.out
 }
 
