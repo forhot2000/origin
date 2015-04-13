@@ -44,8 +44,10 @@ cd $GOPATH/src/github.com/openshift/origin
 make clean build
 
 # start 
+cd $GOPATH/src/github.com/openshift/origin
 sudo -s
 mkdir -p logs/
+export OPENSHIFT_PROFILE=web  # issue: [openshift-master leaks memory](https://github.com/openshift/origin/issues/1530)
 nohup openshift start --public-master="https://ec2-52-4-51-219.compute-1.amazonaws.com:8443" > logs/out.log & 
 exit
 
@@ -86,6 +88,7 @@ openshift kube resize --replicas=2 replicationController frontend-1 -n test
 
 
 # clean
+cd $GOPATH/src/github.com/openshift/origin
 sudo examples/sample-app/cleanup.sh
 docker ps -a | awk '{ print $NF " " $1 }' | grep ^k8s_ | awk '{print $2}' |  xargs -l -r docker rm
 
