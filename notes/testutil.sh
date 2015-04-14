@@ -49,7 +49,7 @@ function clean
 function start_miswhale
 {
   openshift ex new-project miswhale --display-name="MisWhale" --description="Misfit MisWhale" --admin="$user"
-  osc process -n miswhale -f miswhale-sti-template.json | osc create -n miswhale -f -
+  osc process -n miswhale -f notes/miswhale-sti-template.json | osc create -n miswhale -f -
 }
 
 function rolling_update_miswhale
@@ -59,7 +59,7 @@ function rolling_update_miswhale
 
 function delete_miswhale
 {
-  osc process -n miswhale -f miswhale-sti-template.json | osc delete -n miswhale -f -
+  osc process -n miswhale -f notes/miswhale-sti-template.json | osc delete -n miswhale -f -
   osc delete pods --all -n miswhale
   osc delete builds --all -n miswhale
 }
