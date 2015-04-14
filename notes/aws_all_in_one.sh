@@ -45,13 +45,11 @@ make clean build
 
 # start 
 cd $GOPATH/src/github.com/openshift/origin
-sudo -s
-mkdir -p logs/
+sudo rm nohup.out
 export OPENSHIFT_PROFILE=web  # issue: [openshift-master leaks memory](https://github.com/openshift/origin/issues/1530)
-nohup openshift start --public-master="https://ec2-52-4-51-219.compute-1.amazonaws.com:8443" > logs/out.log & 
-exit
+sudo nohup _output/local/go/bin/openshift start --public-master="https://ec2-52-4-51-219.compute-1.amazonaws.com:8443" & 
 
-sudo tail -f logs/out.log
+sudo tail -f nohup.out
 
 #manual: open https://ec2-52-4-51-219.compute-1.amazonaws.com:8443/console/
 
