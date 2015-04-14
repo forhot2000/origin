@@ -11,7 +11,7 @@ alias osc="_output/local/go/bin/osc"
 function up
 {
   sudo rm nohup.out
-  sudo nohup openshift start --public-master="$public_master" &
+  sudo nohup _output/local/go/bin/openshift start --public-master="$public_master" &
   echo "listend on $public_master"
 }
 
