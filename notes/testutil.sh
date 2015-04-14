@@ -106,8 +106,6 @@ function start_project
   case "$project" in
     "miswhale" ) start_miswhale;;
     "ruby-sample" ) start_ruby_sample;;
-    "registry" ) start_registry;;
-    "router" ) start_router;;
     * ) echo "unknow project: $project" && exit 1;
   esac
 }
@@ -169,6 +167,8 @@ do
     "logs" ) logs;;
     "kill" ) kill_proc;;
     "clean" ) clean;;
+    "registry" ) start_registry;;
+    "router" ) start_router;;
     "start" ) start_project;;
     "rollingupdate" ) rolling_update_project;;
     "delete" ) delete_project;;
